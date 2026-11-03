@@ -1,15 +1,26 @@
-"""Fair duty assignment ("deficit" scheduling).
+"""Fair duty assignment: the fair carpool algorithm, with extensions.
 
-Every slot (a day of kitchen duty, a week of trash duty) is one job. `n` people are put
-on it (kitchen: 2, trash: 1), but only one of them does it: whoever marks it done first.
-All users available for that slot accrue an equal share `1 / len(available)` of
-*expected* work. A user's debt is `expected - credit`, where credit counts the jobs they
-actually did. The `n` users with the highest debt are picked, not counting their share of
-slots they are on that nobody has marked done yet (see `Balance.pending`).
+Base: R. Fagin and J. H. Williams, "A Fair Carpool Scheduling Algorithm", IBM Journal of
+Research and Development 27(2), 1983. Each day of a carpool, the k people riding owe 1/k
+of the drive each, and the driver earns 1; whoever is furthest behind drives next. Here a
+slot (a day of kitchen duty, a week of trash duty) is the trip, the users available for it
+are the riders, and whoever marks it done is the driver. A user's debt is
+`expected - credit` (the paper's score, negated), and the highest debt goes next. In the
+paper every trip is driven; to match that, a slot counts only once someone has done it,
+so the debts sum to 0.
 
-Away or inactive users accrue nothing, so being away is automatically fair, and new
-users start at debt 0 instead of inheriting a backlog. Missed duties give no credit,
-so the person comes up again soon. The same goes for the partner who didn't clean.
+Our extensions:
+- `n` people are put on a slot (kitchen: 2, trash: 1), but only one of them does it:
+  whoever marks it done first. Picking ignores their share of slots they are on that
+  nobody has marked done yet (see `Balance.pending`), so they aren't picked twice.
+- Ties go to whoever did it longest ago, then by room, so picks are reproducible.
+- Away or inactive users accrue nothing, so being away is automatically fair, and new
+  users start at debt 0 instead of inheriting a backlog.
+- A missed (or excused, or disputed) slot counts for nobody: no share, no credit, so the
+  people on it are still on top and come up again soon. Strikes do the punishing.
+- Penalty weeks are outside the count.
+- Moving out: the share of someone who moved out is dropped, not passed on (see `accrue`),
+  and their debt leaves with them. This is the one place the sum can differ from 0.
 
 The preview can't know who of an open slot's people will mark it done, so it replaces
 them by two `Role`s: whoever does it (with the credit) and whoever doesn't (without).

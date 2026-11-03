@@ -65,6 +65,11 @@ def slot_credit(slot: Slot, a: Assignment) -> Fraction:
     return Fraction(1)
 
 
+def slot_counts(slot: Slot) -> bool:
+    """Whether `slot` counts for fairness: a regular slot that someone has done."""
+    return not slot.is_penalty and any(a.status is Status.done for a in slot.assignments)
+
+
 def slot_pending(slot: Slot, a: Assignment) -> Fraction:
     """While nobody has marked a slot done, its pending people share the job.
 
@@ -81,7 +86,10 @@ def slot_pending(slot: Slot, a: Assignment) -> Fraction:
 async def load_balances(session: AsyncSession, duty: Duty) -> dict[int, Balance]:
     """Every user's fairness balance for `duty`, computed from all slots so far.
 
-    Balances are never stored; they are always recomputed from the history.
+    Balances are never stored; they are always recomputed from the history. Like a trip in
+    the carpool algorithm, a slot counts only once someone has done it: one that was missed,
+    excused or disputed (or is still open) charges nobody. So the debts always sum to 0,
+    apart from what residents who moved out owed.
     """
     balances: dict[int, Balance] = {}
 
@@ -93,7 +101,7 @@ async def load_balances(session: AsyncSession, duty: Duty) -> dict[int, Balance]
         )
     ).all()
     for slot in slots:
-        if not slot.is_penalty:
+        if slot_counts(slot):
             scheduling.accrue(balances, [e.user_id for e in slot.eligible])
         for a in slot.assignments:
             if a.user_id is None:
@@ -407,18 +415,23 @@ async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> 
             Slot.start_date < first,
             Slot.assignments.any(Assignment.status == Status.pending),
         )
-        .options(selectinload(Slot.assignments))
+        .options(selectinload(Slot.assignments), selectinload(Slot.eligible))
     )
+    open_earlier = [s for s in earlier if not slot_counts(s)]
     open_slots = [
         (s.start_date, [a.user_id for a in s.assignments if a.status is Status.pending])
-        for s in earlier
-        if not any(a.status is Status.done for a in s.assignments)
+        for s in open_earlier
     ]
+    # Both outcomes the preview shows for an open slot ("did it", "didn't do it") assume
+    # someone does it, so it counts here.
+    balances = await load_balances(session, duty)
+    for s in open_earlier:
+        scheduling.accrue(balances, [e.user_id for e in s.eligible])
 
     # plan() returns one list of user ids per `todo` slot, in the same order.
     planned = iter(
         scheduling.plan(
-            await load_balances(session, duty),
+            balances,
             await load_candidates(session),
             todo,
             n,

@@ -64,9 +64,10 @@ def run(cands, n_days, start=START, miss_on=None, balances=None, claimer=None):
     picks, doers = [], []
     for d, _ in days(n_days, start):
         [picked] = plan(balances, cands, [(d, d)], 2)
-        accrue(balances, [c.id for c in cands if c.is_available(d, d)])
         doer = None if d == miss_on or not picked else claimer(picked)
+        # Only a slot someone did counts, as in `duties.load_balances`.
         if doer is not None:
+            accrue(balances, [c.id for c in cands if c.is_available(d, d)])
             credit(balances, doer, d)
         picks.append(picked)
         doers.append(doer)
