@@ -116,7 +116,9 @@ async def kitchen_pair(session, people, day=MONDAY):
     await jobs.daily_tick(session, at(day))
     kitchen = await duties.get_slot(session, Duty.kitchen, day)
     by_id = {p.id: p for p in people}
-    first, second = kitchen.assignments
+    # Loaded like the routes do, so each assignment keeps its slot loaded even if the caller
+    # drops `kitchen` (otherwise `a.slot` may need a lazy load, which async can't do).
+    first, second = [await duties.get_assignment(session, a.id) for a in kitchen.assignments]
     return kitchen, first, second, by_id[first.user_id], by_id[second.user_id]
 
 
