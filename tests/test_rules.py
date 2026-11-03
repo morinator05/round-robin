@@ -116,7 +116,9 @@ async def kitchen_pair(session, people, day=MONDAY):
     await jobs.daily_tick(session, at(day))
     kitchen = await duties.get_slot(session, Duty.kitchen, day)
     by_id = {p.id: p for p in people}
-    first, second = kitchen.assignments
+    # Loaded like the routes do, so each assignment keeps its slot loaded even if the caller
+    # drops `kitchen` (otherwise `a.slot` may need a lazy load, which async can't do).
+    first, second = [await duties.get_assignment(session, a.id) for a in kitchen.assignments]
     return kitchen, first, second, by_id[first.user_id], by_id[second.user_id]
 
 
@@ -172,6 +174,44 @@ async def test_open_slot_is_shared_for_picking_but_not_for_debt(session):
     # Tomorrow is picked before anyone marked today done; today's pair isn't picked again.
     tomorrow = await duties.materialize(session, Duty.kitchen, MONDAY + timedelta(days=1))
     assert {a.user_id for a in tomorrow.assignments}.isdisjoint({p1.id, p2.id})
+
+
+async def test_slot_nobody_cleaned_does_not_count(session):
+    """A slot nobody cleaned (missed, excused, disputed) counts for nobody."""
+    people = await make_users(session)
+    await kitchen_pair(session, people)
+    # Monday's and Tuesday's kitchen duty are missed by Wednesday afternoon.
+    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1)))
+    await jobs.daily_tick(session, at(MONDAY + timedelta(days=2), 13))
+
+    balances = await duties.load_balances(session, Duty.kitchen)
+    assert all(b.debt == 0 for b in balances.values())
+
+
+async def test_debts_sum_to_zero(session):
+    """All debts sum to 0: what the person who cleaned did, the others owe."""
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_done(session, first, p1, at(MONDAY, 20))
+
+    balances = await duties.load_balances(session, Duty.kitchen)
+    assert sum(b.debt for b in balances.values()) == 0
+    assert balances[p1.id].debt == Fraction(1, 14) - 1
+
+
+async def test_disputed_slot_stops_counting(session):
+    """A disputed slot wasn't cleaned after all, so it counts for nobody."""
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_done(session, first, p1, at(MONDAY, 20))
+
+    await duties.dispute(session, first, admin, at(MONDAY, 21))
+    balances = await duties.load_balances(session, Duty.kitchen)
+    assert all(b.debt == 0 for b in balances.values())
 
 
 async def test_preview_shows_open_pair_as_roles(session):

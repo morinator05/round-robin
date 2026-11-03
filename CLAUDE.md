@@ -33,12 +33,17 @@ FastAPI with server-rendered Jinja templates and htmx (vendored, no JS build), a
 SQLAlchemy on Postgres (asyncpg), APScheduler.
 
 **Fairness is computed, never stored.** `app/services/scheduling.py` is pure (no DB) and
-holds the model: each slot (one kitchen day / one trash week) is one job, and everyone
-available for it accrues `1/len(available)` of expected work (`accrue`). Debt = expected −
-credit; only the person who marked it done gets credit. `pick` chooses the highest
-`priority` (debt minus `pending` shares of open slots they're already on), ties broken by
-`last_done`, then room. All values are `Fraction`s. `app/services/duties.load_balances`
-rebuilds every balance from the full slot history on each call.
+implements Fagin & Williams' fair carpool algorithm (1983) plus our extensions (listed in
+its module docstring). Each slot (one kitchen day / one trash week) is one job, and
+everyone available for it accrues `1/len(available)` of expected work (`accrue`). Debt =
+expected − credit; only the person who marked it done gets credit. `pick` chooses the
+highest `priority` (debt minus `pending` shares of open slots they're already on), ties
+broken by `last_done`, then room. All values are `Fraction`s.
+`app/services/duties.load_balances` rebuilds every balance from the full slot history on
+each call, and only slots someone did count (`duties.slot_counts`), so debts sum to 0.
+The one deliberate exception: a moved-out resident's debt leaves with them.
+`duties.preview` adds the shares of still open slots itself, since its Roles assume the
+slot gets done.
 
 **Slots.** A `Slot` has `SlotEligible` rows (who was available, so shares stay correct
 later) and `Assignment` rows (who was put on it, with a `Status`). Only the current day's

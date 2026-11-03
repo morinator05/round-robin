@@ -15,14 +15,17 @@ tracks who did it and gives strikes for missed duties. The UI is in German.
 
 **Fairness**
 
-Each slot is one job, split equally among everyone available (active, not away). Debt
-("Schuld") = shares − jobs done. The highest debt is picked next; ties go to whoever cleaned
-longest ago (never cleaned = first). Being put on a duty without cleaning doesn't move you
-back. Example with 15 residents: a slot adds 1/15 ≈ 0.07 to everyone, the person who cleans
-ends at 0.07 − 1 ≈ −0.93. All debts sum to 0.
+This is the fair carpool algorithm (Fagin & Williams, 1983). Each slot someone cleaned is
+one job, split equally among everyone available (active, not away). Debt ("Schuld") =
+shares − jobs done. The highest debt is picked next; ties go to whoever cleaned longest ago
+(never cleaned = first). Being put on a duty without cleaning doesn't move you back.
+Example with 15 residents: a slot adds 1/15 ≈ 0.07 to everyone, the person who cleans ends
+at 0.07 − 1 ≈ −0.93. All debts sum to 0, except for what residents who moved out owed.
 - Away or paused: no share for that time.
 - New residents start at 0.
-- Only the person who cleaned gets credit. Missed duties give no credit.
+- Only the person who cleaned gets credit.
+- A slot nobody cleaned (missed, excused or disputed) counts for nobody: no share, no
+  credit. Whoever missed it is still on top and comes up again soon.
 - Kitchen and trash are counted separately; penalty weeks not at all.
 
 **Strikes**
