@@ -1,7 +1,7 @@
 [project]
-name = "a4-manager"
+name = "round-robin-a4"
 version = "0.1.0"
-description = "Duty manager (Küchendienst, Mülldienst, strikes) for dorm floor A4"
+description = "Fair duty scheduler (Küchendienst, Mülldienst, strikes) for dorm floor A4"
 authors = [{ name = "Mori" }]
 requires-python = ">=3.12"
 dependencies = [
