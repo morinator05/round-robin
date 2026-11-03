@@ -1,4 +1,4 @@
-# A4 Manager
+# Round Robin A4
 
 Web app for the cleaning duties on dorm floor A4: assigns kitchen and trash duty fairly,
 tracks who did it and gives strikes for missed duties. The UI is in German.
