@@ -5,9 +5,9 @@
     uv run python scripts/seed.py --days 30        # plus a simulated month of duties
 
 Usernames are the lowercase first names; existing usernames are skipped, so it is
-safe to run more than once. Current slots that nobody has finished yet are picked
-again, so everyone gets their share (on startup the app may have created them while
-only the Flursprecher existed). Afterwards today's duties are assigned.
+safe to run more than once. Current trips that nobody has driven yet get their
+potential drivers chosen again, so everyone rides along (on startup the app may have
+created them while only the Flursprecher existed). Afterwards today's duties are assigned.
 
 `--days N` needs a database without history (`docker compose down -v`). It plays the
 last N days through the app's own rules: the daily job at 00:05 and 12:05, each duty
@@ -31,7 +31,7 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
-from app.models import Assignment, Duty, Slot, Status, Strike, User  # noqa: E402
+from app.models import Duty, PotentialDriver, Status, Strike, Trip, User  # noqa: E402
 from app.services import duties, jobs, users  # noqa: E402
 
 # fmt: off
@@ -55,19 +55,19 @@ def at(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour, minute), settings.tz)
 
 
-async def reset_open_slots(session: AsyncSession, today: date) -> int:
-    """Delete current and future regular slots where nobody has done anything yet.
+async def reset_open_trips(session: AsyncSession, today: date) -> int:
+    """Delete current and future regular trips where nobody has done anything yet.
 
     The next daily job creates them again, with everyone who exists by then.
     """
-    slots = await session.scalars(
-        select(Slot)
-        .where(Slot.end_date >= today, Slot.is_penalty.is_(False))
-        .options(selectinload(Slot.assignments))
+    trips = await session.scalars(
+        select(Trip)
+        .where(Trip.end_date >= today, Trip.is_penalty.is_(False))
+        .options(selectinload(Trip.potential_drivers))
     )
-    stale = [s.id for s in slots if all(a.status is Status.pending for a in s.assignments)]
+    stale = [t.id for t in trips if all(pd.status is Status.pending for pd in t.potential_drivers)]
     if stale:
-        await session.execute(delete(Slot).where(Slot.id.in_(stale)))
+        await session.execute(delete(Trip).where(Trip.id.in_(stale)))
         await session.commit()
         session.expire_all()
     return len(stale)
@@ -82,13 +82,14 @@ async def tick(session: AsyncSession, now: datetime) -> None:
     session.expire_all()
 
 
-async def mark(session: AsyncSession, assignment_id: int, now: datetime) -> None:
-    """The assignment's person marks it done at `now`, if it is still open."""
-    a = await duties.get_assignment(session, assignment_id)
-    if a.status is not Status.pending or any(x.status is Status.done for x in a.slot.assignments):
+async def mark(session: AsyncSession, potential_driver_id: int, now: datetime) -> None:
+    """The potential driver marks that they drove at `now`, if nobody has driven yet."""
+    pd = await duties.get_potential_driver(session, potential_driver_id)
+    driven = any(x.status is Status.drove for x in pd.trip.potential_drivers)
+    if pd.status is not Status.pending or driven:
         return
-    actor = await session.get(User, a.user_id)
-    await duties.mark_done(session, a, actor, now)
+    actor = await session.get(User, pd.user_id)
+    await duties.mark_as_driver(session, pd, actor, now)
     await session.commit()
     session.expire_all()
 
@@ -102,21 +103,21 @@ async def decide(
     rng: random.Random,
     late: dict[date, list[int]],
 ) -> None:
-    """Whether the slot of `duty` containing `day` gets done at `now`, tomorrow or never."""
-    slot = await duties.get_slot(session, duty, day)
-    if slot is None:
+    """Whether the trip of `duty` containing `day` gets driven at `now`, tomorrow or never."""
+    trip = await duties.get_trip(session, duty, day)
+    if trip is None:
         return
-    pending = [a for a in slot.assignments if a.status is Status.pending and a.user_id]
+    pending = [pd for pd in trip.potential_drivers if pd.status is Status.pending and pd.user_id]
     if not pending:
         return
-    # One of them would do it; whether they do depends on how reliable they are.
-    doer = rng.choice(pending)
+    # One of them would drive; whether they do depends on how reliable they are.
+    driver = rng.choice(pending)
     x = rng.random()
-    r = reliability.get(doer.user_id, 0.9)
+    r = reliability.get(driver.user_id, 0.9)
     if x < r * SAME_DAY:
-        await mark(session, doer.id, now)
+        await mark(session, driver.id, now)
     elif x < r:
-        late.setdefault(now.date() + timedelta(days=1), []).append(doer.id)
+        late.setdefault(now.date() + timedelta(days=1), []).append(driver.id)
 
 
 async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None:
@@ -153,9 +154,9 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
             if step == "tick":
                 await tick(session, when)
             elif step == "late":
-                for assignment_id in late.pop(day, []):
-                    await mark(session, assignment_id, when)
-            elif step == "trash" and duties.slot_bounds(Duty.trash, day)[1] == day:
+                for potential_driver_id in late.pop(day, []):
+                    await mark(session, potential_driver_id, when)
+            elif step == "trash" and duties.trip_bounds(Duty.trash, day)[1] == day:
                 await decide(session, Duty.trash, day, when, reliability, rng, late)
             elif step == "kitchen" and day < today:
                 await decide(session, Duty.kitchen, day, when, reliability, rng, late)
@@ -164,7 +165,7 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     counts = dict(
         (
             await session.execute(
-                select(Assignment.status, func.count()).group_by(Assignment.status)
+                select(PotentialDriver.status, func.count()).group_by(PotentialDriver.status)
             )
         ).all()
     )
@@ -179,8 +180,8 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
     if count > len(FIRST_NAMES):
         sys.exit(f"At most {len(FIRST_NAMES)} residents supported")
     async with SessionLocal() as session:
-        reset = await reset_open_slots(session, settings.today())
-        if days and await session.scalar(select(func.count(Slot.id))):
+        reset = await reset_open_trips(session, settings.today())
+        if days and await session.scalar(select(func.count(Trip.id))):
             sys.exit("--days needs a database without history: docker compose down -v")
         existing = set(await session.scalars(select(User.username)))
         added = 0
@@ -203,7 +204,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
         await jobs.daily_tick(session, settings.now())
     print(f"{added} residents added ({count - added} already existed), password: {password}")
     if reset:
-        print(f"{reset} open slots picked again")
+        print(f"{reset} open trips got their potential drivers chosen again")
 
 
 if __name__ == "__main__":

@@ -65,14 +65,14 @@
   <div class="table-wrap"><table>
     <tr><th>Datum</th><th>Bewohner</th><th>Grund</th><th>Von</th><th class="end">Status</th></tr>
     {% for s in strikes %}
-      <tr{% if s.revoked_at or s.redeemed_by_assignment_id %} class="muted"{% endif %}>
+      <tr{% if s.revoked_at or s.redeemed_by_trip_id %} class="muted"{% endif %}>
         <td>{{ s.created_at|date_time }}</td>
         <td>{{ person(s.user) }}</td>
         <td>{{ s.reason }}</td>
         <td>{{ "automatisch" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
         <td class="end">
           {% if s.revoked_at %}<span class="badge s-excused">zurückgenommen</span>
-          {% elif s.redeemed_by_assignment_id %}<span class="badge s-excused">abgearbeitet</span>
+          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">abgearbeitet</span>
           {% else %}
             <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline">
               <button class="secondary">Zurücknehmen</button>
@@ -88,26 +88,26 @@
   <h2>Dienste <span class="muted">letzte 14 Tage und geplant</span></h2>
   <div class="table-wrap"><table>
     <tr><th>Datum</th><th>Dienst</th><th>Bewohner</th><th>Status</th><th class="end"></th></tr>
-    {% for slot in slots %}
-      {% set slot_done = slot.assignments|selectattr("status", "equalto", Status.done)|list %}
-      {% for a in slot.assignments %}
+    {% for trip in trips %}
+      {% set driven = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|list %}
+      {% for pd in trip.potential_drivers %}
         <tr>
-          <td>{{ slot.start_date|weekday }} {{ slot.start_date|short_date }}{% if slot.end_date != slot.start_date %}–{{ slot.end_date|short_date }}{% endif %}</td>
-          <td>{{ slot.duty.label }}{% if slot.is_penalty %} <span class="penalty">(Strafe)</span>{% endif %}</td>
-          <td>{{ person(a.user) }}</td>
+          <td>{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}</td>
+          <td>{{ trip.duty.label }}{% if trip.is_penalty %} <span class="penalty">(Strafe)</span>{% endif %}</td>
+          <td>{{ person(pd.user) }}</td>
           <td>{% include "partials/status.html" %}</td>
           <td class="end">
-            {% if not slot_done %}
-              <form method="post" action="/assignments/{{ a.id }}/done?next=/admin" class="inline">
+            {% if not driven %}
+              <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
                 <button class="secondary">Erledigt</button></form>
             {% endif %}
-            {% if a.status == Status.done %}
-              <form method="post" action="/admin/assignments/{{ a.id }}/dispute?next=/admin" class="inline"
+            {% if pd.status == Status.drove %}
+              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
                     hx-confirm="Eingetragen, aber nicht gemacht? Gibt einen Strike.">
                 <button class="danger">Beanstanden</button></form>
             {% endif %}
-            {% if a.status in (Status.pending, Status.missed) %}
-              <form method="post" action="/admin/assignments/{{ a.id }}/excuse" class="inline">
+            {% if pd.status in (Status.pending, Status.missed) %}
+              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline">
                 <button class="secondary">Entschuldigen</button></form>
             {% endif %}
           </td>

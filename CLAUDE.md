@@ -32,40 +32,46 @@ unreachable database is an error instead of a skip. The Docker image runs
 FastAPI with server-rendered Jinja templates and htmx (vendored, no JS build), async
 SQLAlchemy on Postgres (asyncpg), APScheduler.
 
-**Fairness is computed, never stored.** `app/services/scheduling.py` is pure (no DB) and
+**Fairness is computed, never stored.** `app/services/carpool.py` is pure (no DB) and
 implements Fagin & Williams' fair carpool algorithm (1983) plus our extensions (listed in
-its module docstring). Each slot (one kitchen day / one trash week) is one job, and
-everyone available for it accrues `1/len(available)` of expected work (`accrue`). Debt =
-expected − credit; only the person who marked it done gets credit. `pick` chooses the
-highest `priority` (debt minus `pending` shares of open slots they're already on), ties
-broken by `last_done`, then room. All values are `Fraction`s.
-`app/services/duties.load_balances` rebuilds every balance from the full slot history on
-each call, and only slots someone did count (`duties.slot_counts`), so debts sum to 0.
-The one deliberate exception: a moved-out resident's debt leaves with them.
-`duties.preview` adds the shares of still open slots itself, since its Roles assume the
-slot gets done.
+its module docstring); the code uses the paper's vocabulary. Each duty is its own carpool:
+a **trip** is one kitchen day / one trash week, its **riders** are the members available
+for it (active, not away), and each rider is charged a fair share of `1/len(riders)`
+(`charge_riders`). Each trip gets `n` **potential drivers** (kitchen 2, trash 1); whoever
+marks it done is the **driver** and gets one drive (`credit_driver`). Score = drives −
+fair share (the paper's score; shown as "Punkte"). `choose_potential_drivers` takes the
+lowest `effective_score` (score plus `pending_share` of undriven trips they're already a
+potential driver on), ties broken by `last_drove`, then room. All values are `Fraction`s.
+`app/services/duties.load_balances` rebuilds every balance from the full trip history on
+each call, and only driven trips count (`duties.was_driven`), so scores sum to 0. The one
+deliberate exception: a moved-out resident's score leaves with them. `duties.preview`
+charges the riders of still undriven trips itself, since its Roles assume the trip gets
+driven.
 
-**Slots.** A `Slot` has `SlotEligible` rows (who was available, so shares stay correct
-later) and `Assignment` rows (who was put on it, with a `Status`). Only the current day's
-kitchen slot and week's trash slot are created in the DB (`duties.materialize`). Future
-slots exist only as a simulation in `duties.preview` → `scheduling.plan`, so they always
-reflect current balances and absences. In the preview, the people on a still open slot are
-replaced by `Role` stand-ins ("did it" / "didn't do it") instead of guessing who cleans.
+**Trips.** A `Trip` has `Rider` rows (who was available, so shares stay correct later) and
+`PotentialDriver` rows (who was chosen, with a `Status`: `pending`, `drove`, `rode` when
+someone else drove, `missed`, `excused`). Only the current day's kitchen trip and week's
+trash trip are created in the DB (`duties.materialize`). Future trips exist only as a
+simulation in `duties.preview` → `carpool.plan`, so they always reflect current balances
+and absences. In the preview, the potential drivers of a still undriven trip are replaced
+by `Role` stand-ins (`drove=True` / `False`) instead of guessing who drives.
 
 **Penalty weeks.** `strikes.issue` calls `check_threshold`; at `STRIKE_THRESHOLD` active
-strikes it creates a trash `Slot` with `is_penalty=True` in the next free week and marks
-those strikes as redeemed. Penalty slots don't count for fairness.
+strikes it creates a trash `Trip` with `is_penalty=True` in the next free week and marks
+those strikes as redeemed by it (`Strike.redeemed_by_trip_id`). Penalty trips don't count
+for fairness.
 
-**Moved-out users.** Deleting a user sets `user_id` to NULL on their slots/assignments
-(`ondelete="SET NULL"`) so history stays. `accrue` takes `None` ids: they still count for
-the share size but their share is dropped, not passed on to others.
+**Moved-out users.** Deleting a user sets `user_id` to NULL on their riders/potential
+drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they
+still count for the share size but their share is dropped, not passed on to others.
 
 **The daily job.** `jobs.daily_tick` takes a Postgres advisory lock, marks overdue
-assignments missed and issues strikes (`duties.process_overdue`), then materializes
-today's slots, and commits. It runs on startup, at 00:05 and `DEADLINE_HOUR`:05
+potential drivers missed and issues strikes (`duties.process_overdue`), then materializes
+today's trips, and commits. It runs on startup, at 00:05 and `DEADLINE_HOUR`:05
 (scheduler in `app/main.py`), from the admin page, and from the dashboard when today's
-slots are missing, so it must stay idempotent. Absences, pausing and deleting users call
-`duties.reconcile` to replace them on pending current/upcoming assignments.
+trips are missing, so it must stay idempotent. Absences, pausing and deleting users call
+`duties.reconcile`, which removes them as riders and pending potential drivers of
+current/upcoming trips and chooses replacements.
 
 **Layers.**
 - `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
@@ -83,9 +89,10 @@ slots are missing, so it must stay idempotent. Absences, pausing and deleting us
 ## Tests
 
 - `tests/conftest.py` points at a separate `a4_test` database (created if missing), drops
-  and recreates all tables per test from `Base.metadata` (not via migrations), disables the
-  scheduler, and monkeypatches `app.db.SessionLocal`. Use the `session` fixture.
-- `tests/test_scheduling.py`: the pure fairness logic. `tests/test_rules.py`: rules against
+  the `public` schema and recreates all tables per test from `Base.metadata` (not via
+  migrations), disables the scheduler, and monkeypatches `app.db.SessionLocal`. Use the
+  `session` fixture.
+- `tests/test_carpool.py`: the pure fairness logic. `tests/test_rules.py`: rules against
   the DB, using `make_users` and `at(day, hour)` with a fixed `MONDAY`. Web pages are
   tested through `httpx.AsyncClient(transport=httpx.ASGITransport(app=app))`.
 - pytest runs with `asyncio_mode = "auto"`, so async tests need no marker.

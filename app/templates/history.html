@@ -13,19 +13,19 @@
 <div class="table-wrap"><table class="history">
   <colgroup><col class="col-date"><col><col>{% if user.is_admin %}<col class="col-action">{% endif %}</colgroup>
   <tr><th>Datum</th><th>Eingeteilt</th><th>Erledigt von</th>{% if user.is_admin %}<th class="end"></th>{% endif %}</tr>
-  {% for slot in slots if slot.duty == duty %}
-    {% set claimed = slot.assignments|selectattr("status", "equalto", Status.done)|first %}
-    {% set disputed = slot.assignments|selectattr("disputed_at")|first %}
+  {% for trip in trips if trip.duty == duty %}
+    {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    {% set disputed = trip.potential_drivers|selectattr("disputed_at")|first %}
     <tr>
-      <td>{{ slot.start_date|weekday }} {{ slot.start_date|short_date }}{% if slot.end_date != slot.start_date %}–{{ slot.end_date|short_date }}{% endif %}
-          {% if slot.is_penalty %}<span class="penalty">(Strafe)</span>{% endif %}</td>
+      <td>{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
+          {% if trip.is_penalty %}<span class="penalty">(Strafe)</span>{% endif %}</td>
       <td>
-        {% for a in slot.assignments %}
-          <div class="assignee"><span>{{ person(a.user) }}</span> {% include "partials/status.html" %}</div>
+        {% for pd in trip.potential_drivers %}
+          <div class="assignee"><span>{{ person(pd.user) }}</span> {% include "partials/status.html" %}</div>
         {% else %}<span class="muted">–</span>{% endfor %}
       </td>
       <td>
-        {% set c = claimed or disputed %}
+        {% set c = driver or disputed %}
         {% if c %}
           <strong>{{ person(c.user) }}</strong>
           <div class="muted">eingetragen {{ c.completed_at|date_time }}
@@ -35,9 +35,9 @@
       </td>
       {% if user.is_admin %}
         <td class="end">
-          {% if claimed %}
-            <form method="post" action="/admin/assignments/{{ claimed.id }}/dispute?next={{ ('/history?until=' ~ until)|urlencode }}" class="inline"
-                  hx-confirm="{{ claimed.user.display_name if claimed.user else 'ehemalig' }} hat eingetragen, aber nicht geputzt? Gibt einen Strike.">
+          {% if driver %}
+            <form method="post" action="/admin/potential-drivers/{{ driver.id }}/dispute?next={{ ('/history?until=' ~ until)|urlencode }}" class="inline"
+                  hx-confirm="{{ driver.user.display_name if driver.user else 'ehemalig' }} hat eingetragen, aber nicht geputzt? Gibt einen Strike.">
               <button class="danger">Beanstanden</button>
             </form>
           {% endif %}

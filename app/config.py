@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # A duty must be marked done by this hour, `deadline_days_after` days after it ended.
     deadline_hour: int = 12
     deadline_days_after: int = 1
-    # People put on each slot; only one of them has to do it.
+    # Potential drivers chosen for each trip (day / week); only one of them has to drive.
     kitchen_people_per_day: int = 2
     trash_people_per_week: int = 1
     # Active strikes that turn into a penalty Mülldienst week.

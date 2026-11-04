@@ -8,6 +8,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-0123456
 
 import asyncpg  # noqa: E402
 import pytest  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
@@ -36,7 +37,10 @@ async def session_factory(monkeypatch):
     try:
         await ensure_test_database()
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
+            # The whole schema, not `drop_all`: that misses tables the models no longer have
+            # (e.g. after a rename), which still reference `users`.
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
             await conn.run_sync(Base.metadata.create_all)
     except OSError:
         if os.environ.get("CI"):  # in CI a missing database is an error, not a skip

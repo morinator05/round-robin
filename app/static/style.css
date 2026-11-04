@@ -93,10 +93,10 @@ tr:has(.role-done) > td, tr:has(.role-skip) > td { background: var(--card-alt); 
 .badge { display: inline-block; padding: .35rem .8rem; font: inherit; font-size: .9rem;
          border: 1px solid var(--neutral-line); white-space: nowrap; text-align: center;
          color: var(--neutral); background: var(--neutral-soft); }
-.s-done { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
 .s-pending { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
 .s-missed { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
-.s-excused, .s-covered { color: var(--neutral); background: var(--neutral-soft);
+.s-excused, .s-rode { color: var(--neutral); background: var(--neutral-soft);
                          border-color: var(--neutral-line); }
 /* Every tag, and every button at the end of a line (in a list of people or a table's .end
    column), is as wide as the longest tag ("zurückgenommen"), whatever the font: an invisible,

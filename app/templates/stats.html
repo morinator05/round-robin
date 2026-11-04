@@ -1,22 +1,22 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Statistik {{ help_link("schuld") }}</h1>
+<h1>Statistik {{ help_link("punkte") }}</h1>
 <div class="table-wrap"><table>
   <tr>
     <th>Name</th>
-    <th>Küche erledigt</th><th>Küche verpasst</th><th>Küche Schuld</th>
-    <th>Müll erledigt</th><th>Müll Schuld</th><th>Straf-Mülldienste</th><th>Strikes</th>
+    <th>Küche erledigt</th><th>Küche verpasst</th><th>Küche Punkte</th>
+    <th>Müll erledigt</th><th>Müll Punkte</th><th>Straf-Mülldienste</th><th>Strikes</th>
   </tr>
   {% for u in users %}
     {% set kb = balances[Duty.kitchen].get(u.id) %}
     {% set tb = balances[Duty.trash].get(u.id) %}
     <tr{% if not u.active %} class="muted"{% endif %}>
       <td>{{ person(u) }}{% if not u.active %} (inaktiv){% endif %}</td>
-      <td>{{ counts.get((u.id, Duty.kitchen, Status.done), 0) }}</td>
+      <td>{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
       <td>{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
-      <td>{{ "%.2f"|format(kb.debt|float) if kb else "0.00" }}</td>
-      <td>{{ counts.get((u.id, Duty.trash, Status.done), 0) }}</td>
-      <td>{{ "%.2f"|format(tb.debt|float) if tb else "0.00" }}</td>
+      <td>{{ "%.2f"|format(kb.score|float) if kb else "0.00" }}</td>
+      <td>{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
+      <td>{{ "%.2f"|format(tb.score|float) if tb else "0.00" }}</td>
       <td>{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
       {# Green without strikes, red one strike before the penalty week, orange in between. #}
       {% set n = active[u.id] %}
