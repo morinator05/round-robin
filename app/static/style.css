@@ -135,14 +135,15 @@ h1.date { font-variant-numeric: tabular-nums; }
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* --- Status tags. Same box as a button, so status and button line up next to each other.
-   Tags are flat and unframed (the border is transparent, so the size stays the same),
-   buttons are framed and slightly raised, so it's clear which one can be clicked. */
-.badge { display: inline-block; padding: .4rem .8rem .3rem; font: inherit; font-size: .88rem;
-         line-height: 1.5; border: 1px solid transparent; white-space: nowrap; text-align: center;
-         color: var(--neutral); background: var(--neutral-soft); }
-.s-drove { color: var(--ok); background: var(--ok-soft); font-weight: 600; }
-.s-pending { color: var(--warn); background: var(--warn-soft); }
-.s-missed { color: var(--bad); background: var(--bad-soft); }
+   Tags are flat with a light frame in their own colour, buttons have a stronger accent
+   frame and are slightly raised, so it's clear which one can be clicked. */
+.badge { display: inline-block; padding: .4rem .9rem .3rem; font: inherit; font-size: .9rem;
+         line-height: 1.5; border: 1px solid var(--neutral-line); white-space: nowrap;
+         text-align: center; color: var(--neutral); background: var(--neutral-soft); }
+.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line);
+           font-weight: 600; }
+.s-pending { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+.s-missed { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
 /* Every tag, and every button at the end of a line (in a list of people or a table's .end
    column), is as wide as the longest tag ("not needed"), whatever the font: an invisible,
    zero-height copy of it sets the width. Bold, so the buttons' heavier text fits as well. */
