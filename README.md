@@ -94,6 +94,7 @@ In `.env`, see `.env.example`.
 | `POSTGRES_PASSWORD` | `a4` | Database password. Use a random one on a server. |
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
+| `FLOOR_NAME` | `A4` | Floor name in the header ("Round Robin A4"). |
 | `DEADLINE_HOUR` | `8` | Deadline hour …; the next people are chosen right after it. |
 | `DEADLINE_DAYS_AFTER` | `1` | … this many days after the duty ends. |
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |

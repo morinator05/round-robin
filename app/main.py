@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title="Round Robin A4", lifespan=lifespan)
+app = FastAPI(title=f"Round Robin {settings.floor_name}", lifespan=lifespan)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,

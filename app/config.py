@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # Signs the login cookie: whoever knows it can log in as anyone. No usable default on purpose.
     secret_key: str = ""
     timezone: str = "Europe/Berlin"
+    # Shown in the header and page title: "Round Robin <floor_name>".
+    floor_name: str = "A4"
     # A duty must be marked done by this hour, `deadline_days_after` days after it ended.
     # Each day's (on Monday also the week's) potential drivers are chosen at this hour too,
     # right after the previous duty's deadline, so only one duty is ever open at a time.

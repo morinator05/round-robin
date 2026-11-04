@@ -1,6 +1,6 @@
 """Seed the database with test residents, optionally with a simulated history.
 
-    uv run python scripts/seed.py                  # 15 residents
+    uv run python scripts/seed.py                  # 10 residents
     uv run python scripts/seed.py -n 20 --password test1234
     uv run python scripts/seed.py --days 30        # plus a simulated month of duties
 
@@ -191,7 +191,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
             await users.create(
                 session,
                 name=name,
-                room_number=f"A4{i + 1:02d}",
+                room_number=f"E1{i + 1:02d}",
                 username=username,
                 password=password,
             )
@@ -207,7 +207,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("-n", "--count", type=int, default=15)
+    parser.add_argument("-n", "--count", type=int, default=10)
     parser.add_argument("--password", default="passwort123")
     parser.add_argument("--days", type=int, default=0, help="simulate this many past days")
     parser.add_argument("--random-seed", type=int, help="same number, same history")

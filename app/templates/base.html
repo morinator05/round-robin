@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Round Robin A4{% endblock %}</title>
+  <title>{% block title %}Round Robin {{ floor_name }}{% endblock %}</title>
   <link rel="preload" href="/static/fonts/overpass-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
   <script src="/static/htmx.min.js" defer></script>
@@ -12,7 +12,7 @@
   {% set path = request.url.path %}
   {% macro nav_link(href, label) %}<a href="{{ href }}"{% if path == href or (href != "/" and path.startswith(href ~ "/")) %} aria-current="page"{% endif %}>{{ label }}</a>{% endmacro %}
   <nav>
-    <a class="brand" href="/">Round Robin <span class="brand-floor">A4</span></a>
+    <a class="brand" href="/">Round Robin <span class="brand-floor">{{ floor_name }}</span></a>
     <div class="nav-links">
       {{ nav_link("/", "Overview") }}
       {{ nav_link("/stats", "Statistics") }}
