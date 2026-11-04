@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Statistics {{ help_link("points") }}</h1>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="stats">
   <tr>
     {# What people look for first comes first, so it's visible on a phone without scrolling. #}
-    <th>Name</th><th class="num">Kitchen points</th><th class="num">Trash points</th><th>Strikes</th>
+    <th>Name</th><th class="num">Kitchen points</th><th class="num">Trash points</th><th class="num">Strikes</th>
     <th class="num">Kitchen done</th><th class="num">Kitchen missed</th>
     <th class="num">Trash done</th><th class="num">Penalty trash duties</th>
   </tr>

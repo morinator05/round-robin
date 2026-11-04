@@ -221,10 +221,18 @@ th { font-size: .82rem; font-weight: 700; color: var(--muted); background: var(-
 tr:hover > td { background: var(--card-alt); }
 /* Dates (always the first column) never wrap. */
 td:first-child { white-space: nowrap; }
+/* The same columns in every table: the first one (a date or a name) is always as wide, the
+   last one (tags, buttons) only as wide as it needs, the others share the rest. So tables
+   on one page line up. */
+th:first-child { width: 12rem; }
+th.end { width: 1%; }
+/* Statistics: all number columns equally wide, headings may take two lines. */
+table.stats { table-layout: fixed; min-width: 46rem; }
+table.stats th { white-space: normal; vertical-align: bottom; }
 /* Muted rows (inactive residents, revoked strikes) keep the normal text size. */
 tr.muted { font-size: inherit; }
 /* Numbers line up on the right, in even-width digits. */
-td.points, td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.points, td.num, th.num, td.strikes { text-align: right; font-variant-numeric: tabular-nums; }
 td.points { font-weight: 600; }
 /* The last column of a table, with tags or buttons: kept at the right edge. */
 th.end, td.end { text-align: right; white-space: nowrap; }
@@ -232,8 +240,8 @@ td.end form.inline + form.inline { margin-left: .4rem; }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
    a week ("Mon 27 Oct–2 Nov") is longer than a day. Narrow screens scroll sideways. */
 table.history { table-layout: fixed; min-width: 56rem; }
-table.history .col-date { width: 11rem; }
-table.history .col-action { width: 12rem; }
+table.history .col-date { width: 12rem; }
+table.history .col-action { width: 9rem; }
 /* Inside a card the table is part of the card: no second shadow, only the card's corners. */
 .card .table-wrap { box-shadow: none; border-radius: 2px; }
 .card form.row + .table-wrap { margin-top: 1rem; }
