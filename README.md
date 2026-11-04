@@ -153,4 +153,4 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 - `app/services/`: the other rules (duties, strikes, users, login, daily job)
 - `app/web.py`: pages and form actions; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
-- `scripts/`: create the first floor speaker, add test residents, take the screenshots above
+- `scripts/`: create the first floor speaker, add test residents
