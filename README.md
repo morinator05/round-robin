@@ -10,7 +10,9 @@ tracks who did it and gives strikes for missed duties. The UI is in English.
 - Trash duty: weekly (Mon–Sun), 1 person.
 - Whoever cleaned clicks "Done" (only on their own duty, from its first day until the
   deadline). The other person becomes "not needed".
-- Deadline: 12:00 the day after the duty ends. After that the duty is "missed".
+- Deadline: 8:00 the day after the duty ends. After that the duty is "missed".
+- Each day's people (on Monday also the week's trash person) are chosen at 8:05, right
+  after the previous duty's deadline. Until then the overview still shows the previous duty.
 - Statuses: open, done, missed, not needed, excused, disputed.
 
 **Fairness**
@@ -52,7 +54,7 @@ it are reassigned immediately. Deleting the absence doesn't give them back.
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `A403`: building, floor, room 01–99.
 
-**Daily job** (00:05 and 12:05): marks missed duties and gives the strikes, then assigns
+**Daily job** (8:05): marks missed duties and gives the strikes, then assigns
 today's kitchen and this week's trash duty. Residents who become unavailable (away, paused,
 deleted) are replaced on their open duties immediately.
 
@@ -60,7 +62,7 @@ deleted) are replaced on their open duties immediately.
 
 | Page | Access | Content |
 |---|---|---|
-| Overview | public | Today's duties, plan for the next 14 days. Today's kitchen pair is shown as "Done" / "Skipped": where they land if they clean or don't |
+| Overview | public | Today's duties, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
 | Statistics | public | Per resident: done, missed, points (score × 100), strikes |
 | History | login | Duty history, 4 weeks per page |
 | My profile | login | Absences, strikes, recent duties, password |
@@ -76,7 +78,7 @@ In `.env`, see `.env.example`.
 | `POSTGRES_PASSWORD` | `a4` | Database password. Use a random one on a server. |
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
-| `DEADLINE_HOUR` | `12` | Deadline hour … |
+| `DEADLINE_HOUR` | `8` | Deadline hour …; the next people are chosen right after it. |
 | `DEADLINE_DAYS_AFTER` | `1` | … this many days after the duty ends. |
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |

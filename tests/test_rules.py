@@ -13,7 +13,6 @@ from app.config import settings
 from app.main import app
 from app.models import Duty, PotentialDriver, Status, Trip
 from app.services import duties, jobs, strikes, users
-from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import LoginThrottle
 from app.services.users import UserError
@@ -65,11 +64,12 @@ async def test_missed_kitchen_strikes_both(session):
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
     chosen = [pd.user_id for pd in kitchen.potential_drivers]
 
-    # Before the deadline (next day 12:00) nothing happens.
-    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1), 11))
+    # Before the deadline (the next day at the deadline hour) nothing happens.
+    hour = settings.deadline_hour
+    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1), hour - 1))
     assert all(pd.status is Status.pending for pd in kitchen.potential_drivers)
 
-    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1), 12))
+    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1), hour))
     await session.refresh(kitchen, ["potential_drivers"])
     assert all(pd.status is Status.missed for pd in kitchen.potential_drivers)
     for uid in chosen:
@@ -217,28 +217,149 @@ async def test_disputed_trip_stops_counting(session):
     assert all(b.score == 0 for b in balances.values())
 
 
-async def test_preview_shows_open_pair_as_roles(session):
+async def test_preview_has_one_plan_per_open_potential_driver(session):
     people = await make_users(session)
     _, first, _, p1, p2 = await kitchen_pair(session, people)
 
-    async def shown():
+    async def plans():
         preview = await duties.preview(
             session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=30)
         )
-        return [u for e in preview for u in e.potential_drivers]
+        return preview.plans
 
-    pair = tuple(sorted([p1.id, p2.id]))
-    before = await shown()
+    before = await plans()
+    assert set(before) == {p1.id, p2.id}
     # Whoever doesn't clean is up again tomorrow; whoever does, much later.
-    assert before[:2].count(Role(MONDAY, False, pair)) == 1
-    assert Role(MONDAY, True, pair) in before
-    assert p1.id not in before and p2.id not in before
+    for driver, other in [(p1, p2), (p2, p1)]:
+        plan = before[driver.id]
+        assert other.id in plan[0].potential_drivers
+        assert all(driver.id not in e.potential_drivers for e in plan[:7])
 
-    # Once it's done, the outcome is known and the names are back.
+    # Once it's done, the outcome is known: a single plan.
     await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
-    after = await shown()
-    assert not any(isinstance(u, Role) for u in after)
-    assert p2.id in after
+    after = await plans()
+    assert list(after) == [None]
+    assert after[None] == before[p1.id]
+
+
+async def test_day_is_chosen_only_after_the_previous_deadline(session):
+    await make_users(session)
+    hour = settings.deadline_hour
+    tuesday = MONDAY + timedelta(days=1)
+    await jobs.daily_tick(session, at(MONDAY, hour))
+    monday_trip = await duties.get_trip(session, Duty.kitchen, MONDAY)
+
+    # Tuesday before the deadline hour: Monday's duty is still the current one.
+    early = at(tuesday, hour - 1)
+    await jobs.daily_tick(session, early)
+    assert await duties.get_trip(session, Duty.kitchen, tuesday) is None
+    assert (await duties.current_trip(session, Duty.kitchen, early)).id == monday_trip.id
+
+    # Right after it: Monday's is settled (missed here) before Tuesday's is chosen.
+    await jobs.daily_tick(session, at(tuesday, hour))
+    await session.refresh(monday_trip, ["potential_drivers"])
+    assert all(pd.status is Status.missed for pd in monday_trip.potential_drivers)
+    tuesday_trip = await duties.get_trip(session, Duty.kitchen, tuesday)
+    assert len(tuesday_trip.potential_drivers) == 2
+
+
+async def history(session, people, days: int, seed: int) -> date:
+    """`days` days of kitchen duty from MONDAY: mostly done by a random one, sometimes
+    missed, one resident away for a while and one moving out. Returns the next day."""
+    rng = random.Random(seed)
+    by_id = {p.id: p for p in people}
+    hour = settings.deadline_hour
+    for i in range(days):
+        day = MONDAY + timedelta(days=i)
+        await jobs.daily_tick(session, at(day, hour))
+        if i == 2:
+            await users.add_away(session, people[5], day, day + timedelta(days=3), day)
+        if i == 4:
+            await users.delete(session, people[9], day)
+        await session.commit()
+        trip = await duties.get_trip(session, Duty.kitchen, day)
+        pending = [pd for pd in trip.potential_drivers if pd.status is Status.pending]
+        if pending and rng.random() > 0.15:
+            pd = await duties.get_potential_driver(session, rng.choice(pending).id)
+            await duties.mark_as_driver(session, pd, by_id[pd.user_id], at(day, 20))
+            await session.commit()
+    return MONDAY + timedelta(days=days)
+
+
+# Seed 3 gives a pair with different scores (the fair choice usually picks equal ones).
+@pytest.mark.parametrize("seed", [3])
+@pytest.mark.parametrize("which", [0, 1])
+async def test_each_plan_is_what_really_happens(session, seed, which):
+    """With the pair's scores apart, each plan is exactly what gets chosen tomorrow once
+    that one marks today's duty as done (the old preview averaged the pair)."""
+    people = await make_users(session)
+    by_id = {p.id: p for p in people}
+    today = await history(session, people, 12, seed)
+    hour = settings.deadline_hour
+    await jobs.daily_tick(session, at(today, hour))
+    trip = await duties.get_trip(session, Duty.kitchen, today)
+    pair = [pd for pd in trip.potential_drivers if pd.status is Status.pending]
+    balances = await duties.load_balances(session, Duty.kitchen)
+    scores = {pd.user_id: balances[pd.user_id].score for pd in pair if pd.user_id in balances}
+    assert len(pair) == 2 and len(set(scores.values())) == 2
+
+    tomorrow = today + timedelta(days=1)
+    before = await duties.preview(session, Duty.kitchen, tomorrow, today + timedelta(days=14))
+    assert set(before.plans) == {pd.user_id for pd in pair}
+
+    driver = pair[which]
+    pd = await duties.get_potential_driver(session, driver.id)
+    await duties.mark_as_driver(session, pd, by_id[driver.user_id], at(today, 20))
+    await session.commit()
+    after = await duties.preview(session, Duty.kitchen, tomorrow, today + timedelta(days=14))
+    assert after.plans[None] == before.plans[driver.user_id]
+
+    await jobs.daily_tick(session, at(tomorrow, hour))
+    chosen = await duties.get_trip(session, Duty.kitchen, tomorrow)
+    real = [x.user_id for x in chosen.potential_drivers]
+    assert real == before.plans[driver.user_id][0].potential_drivers
+
+
+@pytest.mark.parametrize("which", [0, 1])
+async def test_morning_preview_follows_yesterdays_pair(session, which):
+    """Before the deadline hour yesterday's duty is the open one; today's row of the plan
+    for whoever marks it is what gets chosen at the deadline hour."""
+    people = await make_users(session)
+    by_id = {p.id: p for p in people}
+    hour = settings.deadline_hour
+    tuesday = MONDAY + timedelta(days=1)
+    await jobs.daily_tick(session, at(MONDAY, hour))
+    monday = await duties.get_trip(session, Duty.kitchen, MONDAY)
+
+    preview = await duties.preview(session, Duty.kitchen, tuesday, MONDAY + timedelta(days=14))
+    assert preview.open_start == MONDAY
+    assert list(preview.plans) == [pd.user_id for pd in monday.potential_drivers]
+
+    driver = monday.potential_drivers[which]
+    pd = await duties.get_potential_driver(session, driver.id)
+    await duties.mark_as_driver(session, pd, by_id[driver.user_id], at(tuesday, hour - 1))
+    await session.commit()
+    await jobs.daily_tick(session, at(tuesday, hour))
+    chosen = await duties.get_trip(session, Duty.kitchen, tuesday)
+    real = [x.user_id for x in chosen.potential_drivers]
+    assert real == preview.plans[driver.user_id][0].potential_drivers
+
+
+async def test_dashboard_before_the_deadline_hour_shows_yesterday(session, client, monkeypatch):
+    people = await make_users(session)
+    hour = settings.deadline_hour
+    tuesday = MONDAY + timedelta(days=1)
+    await jobs.daily_tick(session, at(MONDAY, hour))
+    await session.commit()
+    monkeypatch.setattr(type(settings), "now", lambda self: at(tuesday, hour - 1))
+    text = (await client.get("/")).text
+    card = text[
+        text.index('id="card-kitchen"') : text.index("</section>", text.index('id="card-kitchen"'))
+    ]
+    assert "yesterday" in card
+    assert "The plan depends on who cleaned yesterday" in text
+    assert await duties.get_trip(session, Duty.kitchen, tuesday) is None
+    assert people
 
 
 async def test_partner_who_did_not_drive_is_chosen_next(session):
@@ -301,7 +422,9 @@ async def test_away_replaces_pending_potential_driver(session):
     preview = await duties.preview(
         session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=3)
     )
-    assert all(leaving_id not in e.potential_drivers for e in preview)
+    assert all(
+        leaving_id not in e.potential_drivers for plan in preview.plans.values() for e in plan
+    )
 
 
 async def test_delete_user_keeps_history_and_replaces(session):
@@ -583,9 +706,84 @@ async def test_stats_shows_whole_points(session, client):
     await session.commit()
     text = (await client.get("/stats")).text
     cells = re.findall(r'<td class="points">([^<]*)</td>', text)
-    kitchen = [int(c) for c in cells[::2]]
+    kitchen = [int(c.replace("\u2212", "-")) for c in cells[::2]]
     assert sorted(kitchen) == [-34, -33, 67]
     assert all(c == "0" for c in cells[1::2])
+
+
+async def test_dashboard_switches_between_plans(session, client):
+    people = await make_users(session, n=6)
+    _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+
+    def current(text):
+        return re.findall(r'cleaner=(\d+)"[^>]*\n?[^>]*aria-current="true"', text)
+
+    text = (await client.get("/")).text
+    assert "The plan depends on who cleans today" in text
+    assert current(text) == [str(p1.id)]
+    text = (await client.get(f"/?cleaner={p2.id}")).text
+    assert current(text) == [str(p2.id)]
+    # Unknown ids fall back to the default; logged in as one of the pair, that's yourself.
+    await login(client, p2.username)
+    assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
+    assert "If you clean" in (await client.get("/")).text
+    # Anything that isn't an id falls back too, instead of an error page.
+    r = await client.get("/?cleaner=abc")
+    assert r.status_code == 200 and current(r.text) == [str(p2.id)]
+
+
+async def test_switching_plans_shows_different_tables(session, client):
+    people = await make_users(session, n=6)
+    _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+
+    def kitchen_preview(text):
+        start = text.index('id="kitchen-preview"')
+        return text[start : text.index("</section>", start)]
+
+    headers = {"HX-Request": "true"}
+    one = (await client.get(f"/?cleaner={p1.id}", headers=headers)).text
+    two = (await client.get(f"/?cleaner={p2.id}", headers=headers)).text
+    # The tables differ (the switch itself aside): whoever doesn't clean is up tomorrow.
+    assert (
+        kitchen_preview(one).split("</table>")[0].split("<table>")[1]
+        != (kitchen_preview(two).split("</table>")[0].split("<table>")[1])
+    )
+
+
+async def test_done_on_the_card_updates_card_and_preview(session, client):
+    people = await make_users(session, n=6)
+    _, first, _, p1, _ = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+    await login(client, p1.username)
+    r = await client.post(
+        f"/potential-drivers/{first.id}/drove?card=1",
+        headers={"HX-Request": "true"},
+        follow_redirects=True,
+    )
+    # htmx follows to the dashboard and takes the card and the previews from it.
+    assert r.status_code == 200 and 'id="card-kitchen"' in r.text
+    assert 'id="kitchen-preview"' in r.text and "The plan depends on" not in r.text
+
+
+async def test_preview_with_one_driver_left_has_no_switch(session):
+    people = await make_users(session)
+    _, first, _, _, p2 = await kitchen_pair(session, people)
+    admin = people[0]
+    await duties.excuse(session, first, admin, at(MONDAY, 10))
+    preview = await duties.preview(
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=7)
+    )
+    assert list(preview.plans) == [p2.id]
+
+
+async def test_dashboard_without_preview_days(session, client, monkeypatch):
+    people = await make_users(session, n=4)
+    await kitchen_pair(session, people, settings.today())
+    await session.commit()
+    monkeypatch.setattr(settings, "preview_days", 0)
+    assert (await client.get("/")).status_code == 200
 
 
 async def test_stats_colour_strikes(session, client):

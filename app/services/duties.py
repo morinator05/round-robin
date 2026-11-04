@@ -16,7 +16,7 @@ from app.config import settings
 from app.formatting import long_date
 from app.models import Duty, PotentialDriver, Rider, Status, Trip, User
 from app.services import carpool, strikes
-from app.services.carpool import Balance, Member, Role
+from app.services.carpool import Balance, Member
 
 
 class DutyError(Exception):
@@ -42,6 +42,30 @@ def deadline(trip: Trip) -> datetime:
     """Until when the trip can be marked driven; after that it counts as missed."""
     day = trip.end_date + timedelta(days=settings.deadline_days_after)
     return datetime.combine(day, time(settings.deadline_hour), settings.tz)
+
+
+def choose_at(duty: Duty, day: date) -> datetime:
+    """When the potential drivers of the trip containing `day` are chosen.
+
+    At the deadline hour of the trip's first day: right after the previous trip's deadline
+    (with the default DEADLINE_DAYS_AFTER=1), so that trip is done or missed by then. That
+    way only one trip is ever open, and the preview can be exact for each outcome of it.
+    """
+    start, _ = trip_bounds(duty, day)
+    return datetime.combine(start, time(settings.deadline_hour), settings.tz)
+
+
+async def current_trip(session: AsyncSession, duty: Duty, now: datetime) -> Trip | None:
+    """The trip of `duty` that is on at `now`, shown on the dashboard.
+
+    Today's (this week's) trip once it's chosen (`choose_at`); before that the previous
+    one, which can still be marked until its deadline. None if it doesn't exist.
+    """
+    today = now.date()
+    if now >= choose_at(duty, today):
+        return await get_trip(session, duty, today)
+    start, _ = trip_bounds(duty, today)
+    return await get_trip(session, duty, start - timedelta(days=1))
 
 
 async def load_members(session: AsyncSession) -> list[Member]:
@@ -366,17 +390,33 @@ class PreviewEntry:
 
     start: date
     end: date
-    # User ids; `Role`s stand for the potential drivers of a trip nobody has driven yet.
-    potential_drivers: list[int | Role]
+    # User ids of the expected potential drivers.
+    potential_drivers: list[int]
     is_penalty: bool = False
 
 
-async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> list[PreviewEntry]:
+@dataclass
+class Preview:
+    """The expected potential drivers of upcoming trips, one plan per possible outcome.
+
+    Who comes up next depends on who drives the open trip (today's, if nobody has driven
+    it yet), so there is one plan per pending potential driver of it, keyed by their user
+    id. Without an open trip there is a single plan under the key None.
+    """
+
+    # First day of the open trip, if any.
+    open_start: date | None
+    plans: dict[int | None, list[PreviewEntry]]
+
+
+async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> Preview:
     """Expected potential drivers for the trips starting between `start` and `end`.
 
     Trips that already exist (e.g. penalty weeks) are shown as they are; the others are
-    simulated with `carpool.plan`. The potential drivers of earlier trips that nobody has
-    driven yet (e.g. today's kitchen pair) show up as "drove" / "didn't drive" `Role`s.
+    simulated with `carpool.plan`, once per pending potential driver of the open trip, as
+    if that one drove it (`carpool.assume_driven`). Older trips nobody has driven yet (e.g.
+    yesterday's before the deadline) count as `load_balances` has them: their potential
+    drivers keep their share reserved, as when the real trips are chosen.
     """
     n = potential_drivers_per_trip(duty)
     step = timedelta(days=1 if duty is Duty.kitchen else 7)
@@ -393,20 +433,14 @@ async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> 
             .options(selectinload(Trip.potential_drivers))
         )
     }
-    entries: list[PreviewEntry] = []
-    todo: list[tuple[date, date]] = []
+    bounds = []
     day = first
     while day <= end:
-        bounds = trip_bounds(duty, day)
-        if day in existing:
-            t = existing[day]
-            drivers = [pd.user_id for pd in t.potential_drivers if pd.user_id]
-            entries.append(PreviewEntry(*bounds, drivers, t.is_penalty))
-        else:
-            todo.append(bounds)
-            entries.append(PreviewEntry(*bounds, []))
+        bounds.append(trip_bounds(duty, day))
         day += step
+    todo = [b for b in bounds if b[0] not in existing]
 
+    # The open trip: the latest regular one before the window that nobody has driven yet.
     earlier = await session.scalars(
         select(Trip)
         .where(
@@ -415,30 +449,40 @@ async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> 
             Trip.start_date < first,
             Trip.potential_drivers.any(PotentialDriver.status == Status.pending),
         )
+        .order_by(Trip.start_date.desc())
         .options(selectinload(Trip.potential_drivers), selectinload(Trip.riders))
     )
-    undriven = [t for t in earlier if not was_driven(t)]
-    undriven_trips = [
-        (t.start_date, [pd.user_id for pd in t.potential_drivers if pd.status is Status.pending])
-        for t in undriven
-    ]
-    # Both outcomes the preview shows for an undriven trip ("drove", "didn't drive") assume
-    # someone drives it, so its riders are charged here.
-    balances = await load_balances(session, duty)
-    for t in undriven:
-        carpool.charge_riders(balances, [r.user_id for r in t.riders])
-
-    # plan() returns one list of potential drivers per `todo` trip, in the same order.
-    planned = iter(
-        carpool.plan(
-            balances,
-            await load_members(session),
-            todo,
-            n,
-            undriven_trips,
-        )
+    open_trip = next((t for t in earlier if not was_driven(t)), None)
+    pending = (
+        [pd for pd in open_trip.potential_drivers if pd.status is Status.pending and pd.user_id]
+        if open_trip
+        else []
     )
-    for e in entries:
-        if (e.start, e.end) in todo:
-            e.potential_drivers = next(planned)
-    return entries
+
+    balances = await load_balances(session, duty)
+    members = await load_members(session)
+    scenarios: dict[int | None, dict[int, Balance]] = {None: balances}
+    if pending:
+        riders = [r.user_id for r in open_trip.riders]
+        released = {pd.user_id: pending_share(open_trip, pd) for pd in pending}
+        scenarios = {
+            pd.user_id: carpool.assume_driven(
+                balances, riders, released, pd.user_id, open_trip.start_date
+            )
+            for pd in pending
+        }
+
+    plans = {}
+    for driver, scenario in scenarios.items():
+        # plan() returns one list of potential drivers per `todo` trip, in the same order.
+        planned = iter(carpool.plan(scenario, members, todo, n))
+        entries = []
+        for b in bounds:
+            if b[0] in existing:
+                t = existing[b[0]]
+                drivers = [pd.user_id for pd in t.potential_drivers if pd.user_id]
+                entries.append(PreviewEntry(*b, drivers, t.is_penalty))
+            else:
+                entries.append(PreviewEntry(*b, next(planned)))
+        plans[driver] = entries
+    return Preview(open_trip.start_date if pending else None, plans)

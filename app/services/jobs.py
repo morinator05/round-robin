@@ -1,4 +1,8 @@
-"""The daily job: flag missed duties and choose the potential drivers for today and this week."""
+"""The daily job: flag missed duties and choose the potential drivers for today and this week.
+
+Today's (and on Monday the week's) potential drivers are only chosen from the deadline hour
+on (`duties.choose_at`), right after the previous duty's deadline.
+"""
 
 import logging
 from datetime import datetime
@@ -20,14 +24,17 @@ DAILY_TICK_LOCK_ID = 4004
 async def daily_tick(session: AsyncSession, now: datetime) -> None:
     """Strike overdue duties, then make sure today's and this week's trips have potential drivers.
 
-    Safe to run any number of times; it also commits. Runs on a schedule, on startup,
-    from the admin page, and from the dashboard if today's trips are missing.
+    Before the deadline hour the new day's (week's) trip isn't chosen yet: the previous one
+    can still be marked until then. Safe to run any number of times; it also commits. Runs
+    on a schedule, on startup, from the admin page, and from the dashboard if the current
+    trips are missing.
     """
     # Serialize ticks (scheduler, startup and page loads may race).
     await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DAILY_TICK_LOCK_ID})
     missed = await duties.process_overdue(session, now)
-    await duties.materialize(session, Duty.kitchen, now.date())
-    await duties.materialize(session, Duty.trash, now.date())
+    for duty in Duty:
+        if now >= duties.choose_at(duty, now.date()):
+            await duties.materialize(session, duty, now.date())
     await session.commit()
     if missed:
         log.info("Marked %d potential drivers as missed", len(missed))

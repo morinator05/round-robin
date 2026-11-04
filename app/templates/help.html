@@ -19,13 +19,12 @@
   <p>The site assigns duties automatically: it's the turn of whoever has cleaned the least so far,
     relative to everyone else. If you're new, you start at zero.</p>
   <p>The <a href="/">overview</a> shows today's duties and the plan for the next
-    {{ preview_days }} days. Your own name is <span class="me">highlighted</span>. The plan can
+    {{ preview_days }} days. Your own name is <span class="me"><span class="person-name">highlighted</span></span>. The plan can
     still change, e.g. when someone misses a duty or is away.</p>
-  <p>If today's people aren't done yet, the kitchen plan shows
-    <span class="role role-done"><span aria-hidden="true">✓</span> Done</span> and
-    <span class="role role-skip"><span aria-hidden="true">✗</span> Skipped</span> instead of their names:
-    that way you see when it's your turn again, depending on whether you clean today (and mark it
-    by midnight) or not.</p>
+  <p>Each day's people are chosen at {{ deadline_hour }}:05, right after the deadline of the day
+    before. Until then the overview still shows yesterday's kitchen duty.</p>
+  <p>As long as nobody from the current kitchen duty has marked it as done, the plan depends on who
+    cleans. Above the kitchen preview, pick who cleans to see the plan for that case.</p>
 </section>
 
 <section class="card help" id="marking">
@@ -81,7 +80,7 @@
   <p><strong>Moving out and in</strong>: delete the old resident and add the new person.
     Don't rename them, or the new person takes over their history and strikes.</p>
   <p><strong>Excuse</strong> and <strong>Dispute</strong>: see <a href="#status">Status</a>.</p>
-  <p><strong>Daily job</strong>: runs automatically at 00:05 and {{ deadline_hour }}:05, marks missed
+  <p><strong>Daily job</strong>: runs automatically at {{ deadline_hour }}:05, marks missed
     duties and assigns the next ones.</p>
 </section>
 {% endif %}

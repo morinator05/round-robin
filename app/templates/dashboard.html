@@ -1,38 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ today|weekday }}, {{ today|long_date }}</h1>
-<div class="grid">
-  {% with trip=kitchen.trip, duty=kitchen.duty, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver %}
+<h1 class="date">{{ today|weekday }} {{ today|short_date }}</h1>
+<div class="grid duties">
+  {% with trip=kitchen.trip, duty=kitchen.duty, day=kitchen.day, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
   {% with trip=trash.trip, duty=trash.duty, deadline=trash.deadline, can_mark_as_driver=trash.can_mark_as_driver %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
 </div>
-{% if not user %}<p class="muted"><a href="/login">Log in</a> to tick off duties.</p>{% endif %}
+{% if not user %}<p class="muted"><a href="/login">Log in</a> to mark duties as done.</p>{% endif %}
 
 <div class="grid">
-  <section>
+  {# While nobody has driven today's kitchen trip, there is one plan per person who could
+     still do it; the links switch between them (only this section is swapped). #}
+  <section class="preview" id="kitchen-preview">
     <h2>Kitchen duty – preview {{ help_link("preview") }}</h2>
+    {% if kitchen_choices|length > 1 %}
+      {% set is_today = kitchen_open_start == today %}
+      {% set when = "today" if is_today else ("yesterday" if kitchen_open_start == yesterday else "on " ~ (kitchen_open_start|weekday) ~ " " ~ (kitchen_open_start|short_date)) %}
+      <div class="plan-switch" role="group" aria-labelledby="plan-switch-label">
+        <span class="muted" id="plan-switch-label">The plan depends on who {{ "cleans" if is_today else "cleaned" }} {{ when }}:</span>
+        {% for u in kitchen_choices %}
+          <a id="plan-{{ u.id }}" href="/?cleaner={{ u.id }}" hx-get="/?cleaner={{ u.id }}" hx-select="#kitchen-preview"
+             hx-target="#kitchen-preview" hx-swap="outerHTML" hx-push-url="true"
+             {% if u.id == kitchen_cleaner %}aria-current="true"{% endif %}>
+            {%- if user and u.id == user.id %}If you {{ "clean" if is_today else "cleaned" }}
+            {%- else %}If {{ person(u) }} {{ "cleans" if is_today else "cleaned" }}{% endif -%}
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
     <div class="table-wrap"><table>
-      {% for e in kitchen_preview %}
+      {% for e in kitchen_plan %}
         <tr>
           <td>{{ e.start|weekday }} {{ e.start|short_date }}</td>
-          <td>{% for uid in e.potential_drivers %}{% if uid is role %}{{ role(uid) }}{% else %}{{ person(users_by_id[uid]) }}{% endif %}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">–</span>{% endfor %}</td>
+          <td>{% for uid in e.potential_drivers %}{{ person(users_by_id[uid]) }}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">–</span>{% endfor %}</td>
         </tr>
       {% endfor %}
-      {% for r in kitchen_later %}
+      {% for u in kitchen_later if kitchen_plan %}
         <tr>
           <td class="muted">later</td>
-          <td>{{ role(r) }} <span class="muted">(not before {{ kitchen_preview[-1].start|short_date }})</span></td>
+          <td>{{ person(u) }} <span class="muted">(after {{ kitchen_plan[-1].start|short_date }})</span></td>
         </tr>
       {% endfor %}
     </table></div>
   </section>
-  <section>
+  <section class="preview" id="trash-preview">
     <h2>Trash duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
-      {% for e in trash_preview %}
+      {% for e in trash_plan %}
         <tr>
           <td>{{ e.start|short_date }}–{{ e.end|short_date }}</td>
           <td>{% for uid in e.potential_drivers %}{{ person(users_by_id[uid]) }}{% else %}<span class="muted">–</span>{% endfor %}

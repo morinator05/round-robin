@@ -5,7 +5,6 @@ Routes only parse input, call a service and render or redirect; the rules live i
 doesn't submit the form again.
 """
 
-from dataclasses import replace
 from datetime import date, timedelta
 from fractions import Fraction
 from pathlib import Path
@@ -25,7 +24,6 @@ from app.deps import AdminUser, CurrentUser, OptionalUser, Session
 from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, carpool, duties, jobs, strikes, users
-from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
 from app.services.users import UserError
@@ -37,16 +35,15 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 def person_html(user: User | None, is_me: bool = False) -> Markup:
     """A person as HTML: the first name stands out, the room is a quieter tag after it.
 
-    `is_me` highlights the logged-in user's own entry, so they find themselves quickly.
+    Both sit in one `.who` that doesn't wrap, so a name never ends up on another line than
+    its room. `is_me` highlights the logged-in user's own entry, so they find themselves
+    quickly.
     """
     if user is None:
         return Markup('<span class="muted">former resident</span>')
-    html = Markup('<span class="person-name">{}</span> <span class="room">{}</span>').format(
-        user.first_name, user.room_number
-    )
-    if is_me:
-        return Markup('<span class="me">{}</span>').format(html)
-    return html
+    return Markup(
+        '<span class="{}"><span class="person-name">{}</span> <span class="room">{}</span></span>'
+    ).format("who me" if is_me else "who", user.first_name, user.room_number)
 
 
 @pass_context
@@ -55,22 +52,6 @@ def person(context, user: User | None) -> Markup:
     viewer = context.get("user")
     is_me = user is not None and viewer is not None and user.id == viewer.id
     return person_html(user, is_me)
-
-
-@pass_context
-def role(context, r: Role) -> Markup:
-    """A preview stand-in: "Done" (whoever drives) or "Skipped" (whoever doesn't).
-
-    For an earlier trip nobody has driven yet (yesterday's before the deadline), its date
-    follows. Green with a tick if driven, amber with a cross if not.
-    """
-    text = "Done" if r.drove else "Skipped"
-    if r.start != context.get("today"):
-        text += f" {short_date(r.start)}"
-    css = "role role-done" if r.drove else "role role-skip"
-    return Markup('<span class="{}"><span aria-hidden="true">{}</span> {}</span>').format(
-        css, "✓" if r.drove else "✗", text
-    )
 
 
 def help_link(topic: str) -> Markup:
@@ -83,8 +64,6 @@ def help_link(topic: str) -> Markup:
 
 templates.env.globals["person"] = person
 templates.env.globals["help_link"] = help_link
-templates.env.globals["role"] = role
-templates.env.tests["role"] = lambda x: isinstance(x, Role)
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
@@ -99,8 +78,8 @@ templates.env.filters["long_date"] = long_date
 templates.env.filters["date_time"] = lambda d: (
     f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}" if d else ""
 )
-# Points with their sign: "+37", "-112", "0".
-templates.env.filters["signed"] = lambda n: f"{n:+d}" if n else "0"
+# Points with their sign: "+37", "−112" (a real minus sign), "0".
+templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"
 templates.env.filters["weekday"] = lambda d: f"{d:%a}"
 
 
@@ -145,6 +124,14 @@ def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
     return {
         "trip": trip,
         "duty": duty,
+        # Before the deadline hour the kitchen card still shows yesterday's duty.
+        "day": (
+            "today"
+            if trip is None or trip.start_date == now.date()
+            else "yesterday"
+            if trip.start_date == now.date() - timedelta(days=1)
+            else None
+        ),
         "deadline": duties.deadline(trip) if trip else None,
         "can_mark_as_driver": (
             lambda pd: user is not None and duties.can_mark_as_driver(pd, user, now)
@@ -199,36 +186,58 @@ async def logout(request: Request):
 
 
 @router.get("/")
-async def dashboard(request: Request, session: Session, user: OptionalUser):
-    """Today's duties and the preview; visible without login."""
-    today = settings.today()
-    kitchen = await duties.get_trip(session, Duty.kitchen, today)
-    trash = await duties.get_trip(session, Duty.trash, today)
-    if kitchen is None or trash is None:
-        await jobs.daily_tick(session, settings.now())
-        kitchen = await duties.get_trip(session, Duty.kitchen, today)
-        trash = await duties.get_trip(session, Duty.trash, today)
+async def dashboard(
+    request: Request, session: Session, user: OptionalUser, cleaner: str | None = None
+):
+    """Today's duties and the preview; visible without login.
 
-    tomorrow = today + timedelta(days=1)
+    While nobody has driven today's kitchen trip, the preview has one plan per potential
+    driver; `cleaner` picks which one is shown (default: yourself if you're one of them,
+    else the first).
+    """
+    now = settings.now()
+    today = now.date()
+    # Before the deadline hour that's still yesterday's (last week's) duty.
+    kitchen = await duties.current_trip(session, Duty.kitchen, now)
+    trash = await duties.current_trip(session, Duty.trash, now)
+    if kitchen is None or trash is None:
+        await jobs.daily_tick(session, now)
+        kitchen = await duties.current_trip(session, Duty.kitchen, now)
+        trash = await duties.current_trip(session, Duty.trash, now)
+
+    def after(trip: Trip | None) -> date:
+        """The preview starts with the first trip after the one on the card."""
+        return trip.end_date + timedelta(days=1) if trip else today
+
     horizon = today + timedelta(days=settings.preview_days)
-    kitchen_preview = await duties.preview(session, Duty.kitchen, tomorrow, horizon)
-    shown = [u for e in kitchen_preview for u in e.potential_drivers if isinstance(u, Role)]
-    # Whoever drives today's trip is usually up only after the plan ends; say so below it.
-    later = [
-        r
-        for r in dict.fromkeys(replace(u, drove=True) for u in shown if not u.drove)
-        if r not in shown
-    ]
+    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon)
+    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon)
+    people = await users_by_id(session)
+
+    choices = [uid for uid in kitchen_preview.plans if uid is not None]
+    # Lenient: anything that isn't one of the choices (also "abc") shows the default.
+    chosen = int(cleaner) if cleaner and cleaner.isdigit() else None
+    if chosen not in kitchen_preview.plans:
+        chosen = user.id if user and user.id in choices else next(iter(kitchen_preview.plans))
+    kitchen_plan = kitchen_preview.plans[chosen]
+    # The open trip's potential drivers who aren't up again within the plan (usually
+    # whoever cleans): said below it, so nobody wonders where they went.
+    shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
+    later = [people[uid] for uid in choices if uid not in shown and uid in people]
     return render(
         request,
         "dashboard.html",
         user,
         kitchen=duty_card_ctx(kitchen, Duty.kitchen, user),
         trash=duty_card_ctx(trash, Duty.trash, user),
-        kitchen_preview=kitchen_preview,
+        kitchen_plan=kitchen_plan,
+        kitchen_choices=[people[uid] for uid in choices if uid in people],
+        kitchen_cleaner=chosen,
+        kitchen_open_start=kitchen_preview.open_start,
+        yesterday=today - timedelta(days=1),
         kitchen_later=later,
-        trash_preview=await duties.preview(session, Duty.trash, tomorrow, horizon),
-        users_by_id=await users_by_id(session),
+        trash_plan=next(iter(trash_preview.plans.values())),
+        users_by_id=people,
     )
 
 
@@ -237,7 +246,9 @@ async def mark_as_driver(
     request: Request, session: Session, user: CurrentUser, potential_driver_id: int
 ):
     """Mark who drove (did the duty), from the dashboard card or the admin page."""
-    # The dashboard card posts with `card=1` and swaps only itself with the response.
+    # The dashboard card posts with `card=1`. On success it gets the dashboard again and
+    # takes its own card and the previews from it (hx-select / hx-select-oob), so the
+    # preview shows the now known outcome too.
     is_card_request = bool(request.headers.get("HX-Request") and request.query_params.get("card"))
     try:
         pd = await duties.get_potential_driver(session, potential_driver_id)
@@ -246,16 +257,11 @@ async def mark_as_driver(
     except DutyError as e:
         flash(request, str(e), "error")
         if is_card_request:
-            # A redirect would put the whole page into the card; reload so the flash shows.
+            # The card would drop the error message; reload the page so the flash shows.
             return Response(headers={"HX-Refresh": "true"})
         return redirect(safe_next(request.query_params.get("next")))
     if is_card_request:
-        trip = await duties.get_trip(session, pd.trip.duty, pd.trip.start_date)
-        return templates.TemplateResponse(
-            request,
-            "partials/duty_card.html",
-            {**duty_card_ctx(trip, trip.duty, user), "user": user},
-        )
+        return redirect("/")
     flash(request, "Marked as done")
     return redirect(safe_next(request.query_params.get("next")))
 
