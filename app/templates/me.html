@@ -40,7 +40,7 @@
       <td>{{ s.created_at|date_time }}</td>
       <td>{{ s.reason }}</td>
       <td class="end">{% if s.revoked_at %}<span class="badge s-excused">zurückgenommen</span>
-          {% elif s.redeemed_by_assignment_id %}<span class="badge s-excused">abgearbeitet</span>
+          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">abgearbeitet</span>
           {% else %}<span class="badge s-missed">aktiv</span>{% endif %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">Keine Strikes.</td></tr>{% endfor %}
@@ -49,10 +49,10 @@
 <h2>Meine letzten Dienste</h2>
 <div class="table-wrap"><table>
   <tr><th>Datum</th><th>Dienst</th><th class="end">Status</th></tr>
-  {% for a in history %}
+  {% for pd in history %}
     <tr>
-      <td>{{ a.slot.start_date|weekday }} {{ a.slot.start_date|short_date }}{% if a.slot.end_date != a.slot.start_date %}–{{ a.slot.end_date|short_date }}{% endif %}</td>
-      <td>{{ a.slot.duty.label }}{% if a.slot.is_penalty %} <span class="penalty">(Strafe)</span>{% endif %}</td>
+      <td>{{ pd.trip.start_date|weekday }} {{ pd.trip.start_date|short_date }}{% if pd.trip.end_date != pd.trip.start_date %}–{{ pd.trip.end_date|short_date }}{% endif %}</td>
+      <td>{{ pd.trip.duty.label }}{% if pd.trip.is_penalty %} <span class="penalty">(Strafe)</span>{% endif %}</td>
       <td class="end">{% include "partials/status.html" %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">Noch keine Dienste.</td></tr>{% endfor %}

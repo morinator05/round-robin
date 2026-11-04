@@ -21,11 +21,11 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session
-from app.models import Assignment, AwayPeriod, Duty, Slot, Status, Strike, User
+from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, duties, jobs, strikes, users
+from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
-from app.services.scheduling import Role
 from app.services.users import UserError
 
 router = APIRouter()
@@ -57,17 +57,17 @@ def person(context, user: User | None) -> Markup:
 
 @pass_context
 def role(context, r: Role) -> Markup:
-    """A preview stand-in: "Erledigt" (whoever cleans) or "Ausgelassen" (whoever doesn't).
+    """A preview stand-in: "Erledigt" (whoever drives) or "Ausgelassen" (whoever doesn't).
 
-    For an earlier slot that is still open (yesterday's before the deadline), its date
-    follows. Green with a tick if done, amber with a cross if not.
+    For an earlier trip nobody has driven yet (yesterday's before the deadline), its date
+    follows. Green with a tick if driven, amber with a cross if not.
     """
-    text = "Erledigt" if r.did_it else "Ausgelassen"
+    text = "Erledigt" if r.drove else "Ausgelassen"
     if r.start != context.get("today"):
         text += f" {r.start:%d.%m.}"
-    css = "role role-done" if r.did_it else "role role-skip"
+    css = "role role-done" if r.drove else "role role-skip"
     return Markup('<span class="{}"><span aria-hidden="true">{}</span> {}</span>').format(
-        css, "✓" if r.did_it else "✗", text
+        css, "✓" if r.drove else "✗", text
     )
 
 
@@ -130,18 +130,20 @@ async def users_by_id(session: AsyncSession) -> dict[int, User]:
     return {u.id: u for u in await session.scalars(select(User))}
 
 
-def duty_card_ctx(slot: Slot | None, duty: Duty, user: User | None) -> dict:
+def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
     """Template variables for `partials/duty_card.html`.
 
-    `can_mark` is a function, so the template can ask for each person on the card
-    whether the logged-in user may mark it done.
+    `can_mark_as_driver` is a function, so the template can ask for each potential driver
+    on the card whether the logged-in user may mark them as the driver.
     """
     now = settings.now()
     return {
-        "slot": slot,
+        "trip": trip,
         "duty": duty,
-        "deadline": duties.deadline(slot) if slot else None,
-        "can_mark": (lambda a: user is not None and duties.can_mark_done(a, user, now)),
+        "deadline": duties.deadline(trip) if trip else None,
+        "can_mark_as_driver": (
+            lambda pd: user is not None and duties.can_mark_as_driver(pd, user, now)
+        ),
     }
 
 
@@ -195,21 +197,21 @@ async def logout(request: Request):
 async def dashboard(request: Request, session: Session, user: OptionalUser):
     """Today's duties and the preview; visible without login."""
     today = settings.today()
-    kitchen = await duties.get_slot(session, Duty.kitchen, today)
-    trash = await duties.get_slot(session, Duty.trash, today)
+    kitchen = await duties.get_trip(session, Duty.kitchen, today)
+    trash = await duties.get_trip(session, Duty.trash, today)
     if kitchen is None or trash is None:
         await jobs.daily_tick(session, settings.now())
-        kitchen = await duties.get_slot(session, Duty.kitchen, today)
-        trash = await duties.get_slot(session, Duty.trash, today)
+        kitchen = await duties.get_trip(session, Duty.kitchen, today)
+        trash = await duties.get_trip(session, Duty.trash, today)
 
     tomorrow = today + timedelta(days=1)
     horizon = today + timedelta(days=settings.preview_days)
     kitchen_preview = await duties.preview(session, Duty.kitchen, tomorrow, horizon)
-    shown = [u for e in kitchen_preview for u in e.user_ids if isinstance(u, Role)]
-    # Whoever does today's duty is usually up only after the plan ends; say so below it.
+    shown = [u for e in kitchen_preview for u in e.potential_drivers if isinstance(u, Role)]
+    # Whoever drives today's trip is usually up only after the plan ends; say so below it.
     later = [
         r
-        for r in dict.fromkeys(replace(u, did_it=True) for u in shown if not u.did_it)
+        for r in dict.fromkeys(replace(u, drove=True) for u in shown if not u.drove)
         if r not in shown
     ]
     return render(
@@ -225,14 +227,16 @@ async def dashboard(request: Request, session: Session, user: OptionalUser):
     )
 
 
-@router.post("/assignments/{assignment_id}/done")
-async def mark_done(request: Request, session: Session, user: CurrentUser, assignment_id: int):
-    """Mark a duty as done, from the dashboard card or the Flursprecher page."""
+@router.post("/potential-drivers/{potential_driver_id}/drove")
+async def mark_as_driver(
+    request: Request, session: Session, user: CurrentUser, potential_driver_id: int
+):
+    """Mark who drove (did the duty), from the dashboard card or the Flursprecher page."""
     # The dashboard card posts with `card=1` and swaps only itself with the response.
     is_card_request = bool(request.headers.get("HX-Request") and request.query_params.get("card"))
     try:
-        a = await duties.get_assignment(session, assignment_id)
-        await duties.mark_done(session, a, user, settings.now())
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.mark_as_driver(session, pd, user, settings.now())
         await session.commit()
     except DutyError as e:
         flash(request, str(e), "error")
@@ -241,11 +245,11 @@ async def mark_done(request: Request, session: Session, user: CurrentUser, assig
             return Response(headers={"HX-Refresh": "true"})
         return redirect(safe_next(request.query_params.get("next")))
     if is_card_request:
-        slot = await duties.get_slot(session, a.slot.duty, a.slot.start_date)
+        trip = await duties.get_trip(session, pd.trip.duty, pd.trip.start_date)
         return templates.TemplateResponse(
             request,
             "partials/duty_card.html",
-            {**duty_card_ctx(slot, slot.duty, user), "user": user},
+            {**duty_card_ctx(trip, trip.duty, user), "user": user},
         )
     flash(request, "Als erledigt eingetragen")
     return redirect(safe_next(request.query_params.get("next")))
@@ -266,11 +270,11 @@ async def me(request: Request, session: Session, user: CurrentUser):
         select(Strike).where(Strike.user_id == user.id).order_by(Strike.created_at.desc())
     )
     history = await session.scalars(
-        select(Assignment)
-        .join(Assignment.slot)
-        .where(Assignment.user_id == user.id)
-        .options(selectinload(Assignment.slot))
-        .order_by(Slot.start_date.desc())
+        select(PotentialDriver)
+        .join(PotentialDriver.trip)
+        .where(PotentialDriver.user_id == user.id)
+        .options(selectinload(PotentialDriver.trip))
+        .order_by(Trip.start_date.desc())
         .limit(30)
     )
     return render(
@@ -340,24 +344,24 @@ HISTORY_DAYS = 28
 
 @router.get("/history")
 async def history(request: Request, session: Session, user: CurrentUser, until: date | None = None):
-    """Who claimed which duty, `HISTORY_DAYS` days up to `until`."""
+    """Who drove which trip, `HISTORY_DAYS` days up to `until`."""
     today = settings.today()
     until = min(until or today, today)
     since = until - timedelta(days=HISTORY_DAYS - 1)
-    slots = await session.scalars(
-        select(Slot)
-        .where(Slot.start_date <= until, Slot.end_date >= since)
+    trips = await session.scalars(
+        select(Trip)
+        .where(Trip.start_date <= until, Trip.end_date >= since)
         .options(
-            selectinload(Slot.assignments).selectinload(Assignment.user),
-            selectinload(Slot.assignments).selectinload(Assignment.completed_by),
+            selectinload(Trip.potential_drivers).selectinload(PotentialDriver.user),
+            selectinload(Trip.potential_drivers).selectinload(PotentialDriver.completed_by),
         )
-        .order_by(Slot.start_date.desc(), Slot.duty)
+        .order_by(Trip.start_date.desc(), Trip.duty)
     )
     return render(
         request,
         "history.html",
         user,
-        slots=list(slots),
+        trips=list(trips),
         since=since,
         until=until,
         older=since - timedelta(days=1),
@@ -370,17 +374,17 @@ async def history(request: Request, session: Session, user: CurrentUser, until: 
 
 @router.get("/stats")
 async def stats(request: Request, session: Session, user: OptionalUser):
-    """Per resident: duties done and missed, debt and strikes; visible without login."""
+    """Per resident: duties driven and missed, score and strikes; visible without login."""
     all_users = await users.list_users(session)
     balances = {d: await duties.load_balances(session, d) for d in Duty}
     rows = (
         await session.execute(
-            select(Assignment.user_id, Slot.duty, Slot.is_penalty, Assignment.status).join(
-                Assignment.slot
-            )
+            select(
+                PotentialDriver.user_id, Trip.duty, Trip.is_penalty, PotentialDriver.status
+            ).join(PotentialDriver.trip)
         )
     ).all()
-    # (user id, duty, status) -> number of assignments; penalty weeks count as "penalty".
+    # (user id, duty, status) -> number of trips; penalty weeks count as "penalty".
     counts: dict[tuple, int] = {}
     for uid, duty, is_penalty, status in rows:
         key = (uid, duty, "penalty" if is_penalty else status)
@@ -420,11 +424,11 @@ async def admin(request: Request, session: Session, user: AdminUser):
     """Flursprecher page: residents, strikes and recent duties."""
     all_users = await users.list_users(session)
     since = settings.today() - timedelta(days=14)
-    slots = await session.scalars(
-        select(Slot)
-        .where(Slot.end_date >= since)
-        .options(selectinload(Slot.assignments).selectinload(Assignment.user))
-        .order_by(Slot.start_date.desc(), Slot.duty)
+    trips = await session.scalars(
+        select(Trip)
+        .where(Trip.end_date >= since)
+        .options(selectinload(Trip.potential_drivers).selectinload(PotentialDriver.user))
+        .order_by(Trip.start_date.desc(), Trip.duty)
     )
     all_strikes = await session.scalars(
         select(Strike)
@@ -437,7 +441,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         "admin/index.html",
         user,
         users=all_users,
-        slots=list(slots),
+        trips=list(trips),
         strikes=list(all_strikes),
     )
 
@@ -569,12 +573,14 @@ async def admin_revoke_strike(request: Request, session: Session, user: AdminUse
     return redirect("/admin")
 
 
-@router.post("/admin/assignments/{assignment_id}/excuse")
-async def admin_excuse(request: Request, session: Session, user: AdminUser, assignment_id: int):
-    """Excuse a duty: no strike, no credit."""
+@router.post("/admin/potential-drivers/{potential_driver_id}/excuse")
+async def admin_excuse(
+    request: Request, session: Session, user: AdminUser, potential_driver_id: int
+):
+    """Excuse a duty: no strike, no drive."""
     try:
-        a = await duties.get_assignment(session, assignment_id)
-        await duties.excuse(session, a, user, settings.now())
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.excuse(session, pd, user, settings.now())
         await session.commit()
         flash(request, "Dienst entschuldigt")
     except DutyError as e:
@@ -582,14 +588,16 @@ async def admin_excuse(request: Request, session: Session, user: AdminUser, assi
     return redirect("/admin")
 
 
-@router.post("/admin/assignments/{assignment_id}/dispute")
-async def admin_dispute(request: Request, session: Session, user: AdminUser, assignment_id: int):
-    """Marked done but not actually done: the claimer gets a strike."""
+@router.post("/admin/potential-drivers/{potential_driver_id}/dispute")
+async def admin_dispute(
+    request: Request, session: Session, user: AdminUser, potential_driver_id: int
+):
+    """Marked as driven but not actually done: the driver gets a strike."""
     try:
-        a = await duties.get_assignment(session, assignment_id)
-        await duties.dispute(session, a, user, settings.now())
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.dispute(session, pd, user, settings.now())
         await session.commit()
-        name = a.user.display_name if a.user else "ehemalig"
+        name = pd.user.display_name if pd.user else "ehemalig"
         flash(request, f"Beanstandet, {name} bekommt einen Strike")
     except DutyError as e:
         flash(request, str(e), "error")

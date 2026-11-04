@@ -1,33 +1,34 @@
-{# One duty card on the dashboard. Expects: slot (or None), duty, deadline, can_mark(assignment).
+{# One duty card on the dashboard. Expects: trip (or None), duty, deadline,
+   can_mark_as_driver(potential driver).
    Also returned alone by the "Erledigt" button, which swaps the card via htmx. #}
 <section class="card" id="card-{{ duty.value }}">
   <h2>
     {{ duty.label }}
     <span class="muted">
-      {% if duty == Duty.kitchen %}heute{% elif slot %}{{ slot.start_date|short_date }}–{{ slot.end_date|short_date }}{% endif %}
+      {% if duty == Duty.kitchen %}heute{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
     </span>
   </h2>
-  {% if slot and slot.is_penalty %}<p class="penalty">Straf-Mülldienst ({{ strike_threshold }} Strikes)</p>{% endif %}
-  {% if not slot or not slot.assignments %}
+  {% if trip and trip.is_penalty %}<p class="penalty">Straf-Mülldienst ({{ strike_threshold }} Strikes)</p>{% endif %}
+  {% if not trip or not trip.potential_drivers %}
     <p class="muted">Niemand eingeteilt.</p>
   {% else %}
-    {% for a in slot.assignments %}
+    {% for pd in trip.potential_drivers %}
       <div class="person">
         <div>
-          <div class="name">{{ person(a.user) }}</div>
+          <div class="name">{{ person(pd.user) }}</div>
         </div>
-        {% if can_mark(a) %}
-          <button hx-post="/assignments/{{ a.id }}/done?card=1"
+        {% if can_mark_as_driver(pd) %}
+          <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-swap="outerHTML">Erledigt</button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
       </div>
     {% endfor %}
-    {% set claimed = slot.assignments|selectattr("status", "equalto", Status.done)|first %}
-    {% if claimed %}
-      <p class="muted">Erledigt von {{ person(claimed.user) }}
-        am {{ claimed.completed_at|date_time }}</p>
+    {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    {% if driver %}
+      <p class="muted">Erledigt von {{ person(driver.user) }}
+        am {{ driver.completed_at|date_time }}</p>
     {% else %}
       <p class="muted">Eintragen bis {{ deadline|date_time }}</p>
     {% endif %}

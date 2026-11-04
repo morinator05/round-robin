@@ -1,4 +1,4 @@
-"""The daily job: flag missed duties and pick the people for today and this week."""
+"""The daily job: flag missed duties and choose the potential drivers for today and this week."""
 
 import logging
 from datetime import datetime
@@ -18,10 +18,10 @@ DAILY_TICK_LOCK_ID = 4004
 
 
 async def daily_tick(session: AsyncSession, now: datetime) -> None:
-    """Strike overdue duties, then make sure today's and this week's people are picked.
+    """Strike overdue duties, then make sure today's and this week's trips have potential drivers.
 
     Safe to run any number of times; it also commits. Runs on a schedule, on startup,
-    from the Flursprecher page, and from the dashboard if today's slots are missing.
+    from the Flursprecher page, and from the dashboard if today's trips are missing.
     """
     # Serialize ticks (scheduler, startup and page loads may race).
     await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DAILY_TICK_LOCK_ID})
@@ -30,7 +30,7 @@ async def daily_tick(session: AsyncSession, now: datetime) -> None:
     await duties.materialize(session, Duty.trash, now.date())
     await session.commit()
     if missed:
-        log.info("Marked %d assignments as missed", len(missed))
+        log.info("Marked %d potential drivers as missed", len(missed))
 
 
 async def scheduled_tick() -> None:

@@ -15,17 +15,18 @@ tracks who did it and gives strikes for missed duties. The UI is in German.
 
 **Fairness**
 
-This is the fair carpool algorithm (Fagin & Williams, 1983). Each slot someone cleaned is
-one job, split equally among everyone available (active, not away). Debt ("Schuld") =
-shares − jobs done. The highest debt is picked next; ties go to whoever cleaned longest ago
-(never cleaned = first). Being put on a duty without cleaning doesn't move you back.
-Example with 15 residents: a slot adds 1/15 ≈ 0.07 to everyone, the person who cleans ends
-at 0.07 − 1 ≈ −0.93. All debts sum to 0, except for what residents who moved out owed.
-- Away or paused: no share for that time.
+This is the fair carpool algorithm (Fagin & Williams, 1983): each kitchen day or trash week
+is a trip, everyone available (active, not away) rides along, and whoever cleans drives.
+Each trip that someone cleaned is split equally among its riders. Score ("Punkte") = duties
+cleaned − shares. The lowest score goes next; ties go to whoever cleaned longest ago (never
+cleaned = first). Being put on a duty without cleaning doesn't move you back.
+Example with 15 residents: a trip takes 1/15 ≈ 0.07 from everyone, the person who cleans
+ends at 1 − 0.07 ≈ +0.93. All scores sum to 0, except for those of residents who moved out.
+- Away or paused: not riding, so no share for that time.
 - New residents start at 0.
-- Only the person who cleaned gets credit.
-- A slot nobody cleaned (missed, excused or disputed) counts for nobody: no share, no
-  credit. Whoever missed it is still on top and comes up again soon.
+- Only the person who cleaned gets the point.
+- A trip nobody cleaned (missed, excused or disputed) counts for nobody: no share, no
+  point. Whoever missed it still has the lowest score and comes up again soon.
 - Kitchen and trash are counted separately; penalty weeks not at all.
 
 **Strikes**
@@ -58,7 +59,7 @@ deleted) are replaced on their open duties immediately.
 | Page | Access | Content |
 |---|---|---|
 | Übersicht | public | Today's duties, plan for the next 14 days. Today's kitchen pair is shown as "Erledigt" / "Ausgelassen": where they land if they clean or don't |
-| Statistik | public | Per resident: done, missed, debt, strikes |
+| Statistik | public | Per resident: done, missed, score ("Punkte"), strikes |
 | Verlauf | login | Duty history, 4 weeks per page |
 | Mein Profil | login | Absences, strikes, recent duties, password |
 | Verwaltung | Flursprecher | Admin functions |
@@ -128,7 +129,7 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 
 ## Code
 
-- `app/services/scheduling.py`: the fairness logic, without database (start reading here)
+- `app/services/carpool.py`: the fairness logic, without database (start reading here)
 - `app/services/`: the other rules (duties, strikes, users, login, daily job)
 - `app/web.py`: pages and form actions; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`

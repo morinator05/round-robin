@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Assignment, AwayPeriod, Slot, Status, User
-from app.services import duties, scheduling
+from app.models import AwayPeriod, PotentialDriver, Status, Trip, User
+from app.services import carpool, duties
 from app.services.auth import MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT, hash_password
 
 
@@ -37,7 +37,7 @@ def check_room(room_number: str) -> str:
 async def list_users(session: AsyncSession) -> list[User]:
     """All users, sorted by room."""
     users = await session.scalars(select(User))
-    return sorted(users, key=lambda u: scheduling.room_key(u.room_number))
+    return sorted(users, key=lambda u: carpool.room_key(u.room_number))
 
 
 async def create(
@@ -49,7 +49,7 @@ async def create(
     password: str,
     is_admin: bool = False,
 ) -> User:
-    """Add a resident. Their duty balance starts at zero.
+    """Add a resident. Their score starts at zero.
 
     Raises:
         UserError: if a field is empty, the room number or password is invalid, or the
@@ -110,23 +110,23 @@ async def set_active(session: AsyncSession, user: User, active: bool, today: dat
 
 async def delete(session: AsyncSession, user: User, today: date) -> None:
     """Moving out. The person's history stays anonymised; whoever moves in next is a new
-    user and starts from zero (no debt, no strikes).
+    user and starts from zero (score 0, no strikes).
 
     Their open duties go to someone else.
     """
     # Open penalty weeks go with the person, so those weeks get a regular Mülldienst again.
     open_penalties = await session.scalars(
-        select(Slot)
-        .join(Slot.assignments)
+        select(Trip)
+        .join(Trip.potential_drivers)
         .where(
-            Slot.is_penalty.is_(True),
-            Slot.end_date >= today,
-            Assignment.user_id == user.id,
-            Assignment.status == Status.pending,
+            Trip.is_penalty.is_(True),
+            Trip.end_date >= today,
+            PotentialDriver.user_id == user.id,
+            PotentialDriver.status == Status.pending,
         )
     )
-    for slot in open_penalties.all():
-        await session.delete(slot)
+    for trip in open_penalties.all():
+        await session.delete(trip)
     await session.delete(user)
     await session.flush()
     session.expire_all()

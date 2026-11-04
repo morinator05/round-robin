@@ -22,7 +22,9 @@ class Base(DeclarativeBase):
 
 
 class Duty(str, enum.Enum):
-    """The kind of duty. Kitchen slots are one day, trash slots one Monday-Sunday week."""
+    """The kind of duty; each is a carpool of its own. Kitchen trips are one day, trash
+    trips one Monday-Sunday week.
+    """
 
     kitchen = "kitchen"
     trash = "trash"
@@ -34,28 +36,28 @@ class Duty(str, enum.Enum):
 
 
 class Status(str, enum.Enum):
-    """State of one person's assignment to a slot."""
+    """State of one potential driver of a trip."""
 
-    # Not done yet, the deadline hasn't passed.
+    # Nobody has driven the trip yet, the deadline hasn't passed.
     pending = "pending"
-    # This person did it (marked it done). Gives fairness credit.
-    done = "done"
-    # Deadline passed without anyone doing it, or the Flursprecher disputed a "done".
+    # This person drove (marked it done). Earns them the drive.
+    drove = "drove"
+    # Deadline passed without anyone driving, or the Flursprecher disputed a "drove".
     missed = "missed"
-    # The Flursprecher let it go: no strike, but no credit either.
+    # The Flursprecher let it go: no strike, but no drive either.
     excused = "excused"
-    # Someone else on the same slot already did it.
-    covered = "covered"
+    # Someone else drove the trip; this person just rode along.
+    rode = "rode"
 
     @property
     def label(self) -> str:
         """German name shown in the UI."""
         return {
             "pending": "offen",
-            "done": "erledigt",
+            "drove": "erledigt",
             "missed": "verpasst",
             "excused": "entschuldigt",
-            "covered": "nicht nötig",
+            "rode": "nicht nötig",
         }[self.value]
 
 
@@ -71,7 +73,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     # The Flursprecher, who can manage residents, strikes and everybody's duties.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Inactive users are paused: never picked and they accrue no expected work.
+    # Inactive users are paused: they don't ride, so they are never chosen and owe nothing.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -100,7 +102,7 @@ class User(Base):
 
 
 class AwayPeriod(Base):
-    """A time a resident is away (both dates included). They aren't picked then."""
+    """A time a resident is away (both dates included). They don't ride then."""
 
     __tablename__ = "away_periods"
 
@@ -112,49 +114,49 @@ class AwayPeriod(Base):
     user: Mapped[User] = relationship(back_populates="away_periods")
 
 
-class Slot(Base):
-    """One duty period: a single day for kitchen, a Monday-Sunday week for trash."""
+class Trip(Base):
+    """One trip of a duty's carpool: a single day for kitchen, a Monday-Sunday week for trash."""
 
-    __tablename__ = "slots"
+    __tablename__ = "trips"
     __table_args__ = (UniqueConstraint("duty", "start_date"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     duty: Mapped[Duty] = mapped_column(Enum(Duty, name="duty"))
     start_date: Mapped[date] = mapped_column(Date)
     end_date: Mapped[date] = mapped_column(Date)
-    # Penalty slots are extra work for strikes; they don't count towards fairness.
+    # Penalty trips are extra work for strikes; they don't count towards fairness.
     is_penalty: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    assignments: Mapped[list["Assignment"]] = relationship(
-        back_populates="slot", cascade="all, delete-orphan", order_by="Assignment.id"
+    potential_drivers: Mapped[list["PotentialDriver"]] = relationship(
+        back_populates="trip", cascade="all, delete-orphan", order_by="PotentialDriver.id"
     )
-    eligible: Mapped[list["SlotEligible"]] = relationship(
-        back_populates="slot", cascade="all, delete-orphan"
+    riders: Mapped[list["Rider"]] = relationship(
+        back_populates="trip", cascade="all, delete-orphan"
     )
 
 
-class SlotEligible(Base):
-    """Users that were available for a slot; each accrues an equal share of its expected work."""
+class Rider(Base):
+    """A member who rode on a trip (was available); each is charged an equal fair share."""
 
-    __tablename__ = "slot_eligible"
-    __table_args__ = (UniqueConstraint("slot_id", "user_id"),)
+    __tablename__ = "riders"
+    __table_args__ = (UniqueConstraint("trip_id", "user_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id", ondelete="CASCADE"), index=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"), index=True)
     # NULL once the user was deleted (moved out). The row stays so the others' shares of
-    # past slots don't grow: nobody inherits the work of someone who moved out.
+    # past trips don't grow: nobody inherits the work of someone who moved out.
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
-    slot: Mapped[Slot] = relationship(back_populates="eligible")
+    trip: Mapped[Trip] = relationship(back_populates="riders")
 
 
-class Assignment(Base):
-    """One person put on one slot. A kitchen slot has two of these, a trash slot one."""
+class PotentialDriver(Base):
+    """One person chosen as a potential driver of a trip. Kitchen trips have two, trash one."""
 
-    __tablename__ = "assignments"
+    __tablename__ = "potential_drivers"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    slot_id: Mapped[int] = mapped_column(ForeignKey("slots.id", ondelete="CASCADE"), index=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"), index=True)
     # NULL once the user was deleted (moved out); the history stays.
     user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
@@ -166,7 +168,7 @@ class Assignment(Base):
     # Set when the Flursprecher found it was marked done but not actually done.
     disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    slot: Mapped[Slot] = relationship(back_populates="assignments")
+    trip: Mapped[Trip] = relationship(back_populates="potential_drivers")
     user: Mapped[User | None] = relationship(foreign_keys=[user_id])
     completed_by: Mapped[User | None] = relationship(foreign_keys=[completed_by_id])
 
@@ -182,23 +184,25 @@ class Strike(Base):
     # Given by the daily job for a missed duty (not by the Flursprecher).
     auto: Mapped[bool] = mapped_column(Boolean, default=False)
     # The duty it was given for, if any. Marking that duty done revokes the strike.
-    assignment_id: Mapped[int | None] = mapped_column(
-        ForeignKey("assignments.id", ondelete="SET NULL")
+    potential_driver_id: Mapped[int | None] = mapped_column(
+        ForeignKey("potential_drivers.id", ondelete="SET NULL")
     )
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Set when the Flursprecher took it back, or the duty was done or excused after all.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Set when the strike was "paid off" by a penalty Mülldienst.
-    redeemed_by_assignment_id: Mapped[int | None] = mapped_column(
-        ForeignKey("assignments.id", ondelete="SET NULL")
+    # Set when the strike was "paid off" by a penalty Mülldienst (that penalty trip).
+    redeemed_by_trip_id: Mapped[int | None] = mapped_column(
+        ForeignKey("trips.id", ondelete="SET NULL")
     )
 
     user: Mapped[User] = relationship(back_populates="strikes", foreign_keys=[user_id])
-    assignment: Mapped[Assignment | None] = relationship(foreign_keys=[assignment_id])
+    potential_driver: Mapped[PotentialDriver | None] = relationship(
+        foreign_keys=[potential_driver_id]
+    )
     issued_by: Mapped[User | None] = relationship(foreign_keys=[issued_by_id])
 
     @property
     def is_active(self) -> bool:
         """Counts towards the penalty threshold: neither revoked nor paid off."""
-        return self.revoked_at is None and self.redeemed_by_assignment_id is None
+        return self.revoked_at is None and self.redeemed_by_trip_id is None
