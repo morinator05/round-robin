@@ -9,7 +9,7 @@
     <div class="panel">
     <form method="post" action="/admin/users" class="row">
       <label>Name <input name="name" required></label>
-      <label class="short">Room <input name="room_number" placeholder="e.g. A404" required pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. A403"></label>
+      <label class="short">Room <input name="room_number" placeholder="e.g. E104" required pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
       <label>Username <input name="username" required></label>
       <label>Initial password <input name="password" minlength="{{ min_password_length }}" required></label>
       <label class="check"><span><input type="checkbox" name="is_admin" value="true"> Floor speaker</span></label>
@@ -29,7 +29,7 @@
       <div class="panel">
         <form method="post" action="/admin/users/{{ u.id }}/edit" class="row">
           <label>Name <input name="name" value="{{ u.name }}"></label>
-          <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. A403"></label>
+          <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
           <label>New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
           <label class="check"><span><input type="checkbox" name="is_admin" value="true" {% if u.is_admin %}checked{% endif %}
                  {% if u.id == user.id %}disabled{% endif %}> Floor speaker</span></label>

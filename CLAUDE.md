@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Round Robin A4 assigns kitchen duty (daily, 2 people, one of them cleans) and trash duty (weekly,
+Round Robin assigns kitchen duty (daily, 2 people, one of them cleans) and trash duty (weekly,
 1 person) on a dorm floor fairly, tracks who did it and gives strikes for missed duties. The
 app's rules (fairness, deadlines, strikes, absences, admin powers) are in `README.md`; that
 is the spec for behaviour. The UI text is English.

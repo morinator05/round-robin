@@ -31,7 +31,7 @@ def days(n: int, start: date = START) -> list[tuple[date, date]]:
 
 def people(n: int) -> list[Member]:
     """`n` members with ids 1..n, nobody away."""
-    return [Member(id=i, room=f"A4.{i}") for i in range(1, n + 1)]
+    return [Member(id=i, room=f"E1.{i}") for i in range(1, n + 1)]
 
 
 @pytest.mark.parametrize("n_people", [3, 7, 15, 30])
@@ -51,7 +51,7 @@ def test_no_double_duty_on_consecutive_days():
 def test_away_people_are_skipped_and_not_charged():
     members = people(15)
     away_start, away_end = START + timedelta(days=30), START + timedelta(days=89)
-    members[0] = Member(id=1, room="A4.1", away=((away_start, away_end),))
+    members[0] = Member(id=1, room="E1.1", away=((away_start, away_end),))
     result = plan({}, members, days(180), 2)
 
     away_days = {d for d, _ in days(180) if away_start <= d <= away_end}
@@ -121,13 +121,13 @@ def test_missed_trip_comes_up_again_soon():
 def test_new_member_does_not_get_backlog():
     members = people(14)
     balances, _, _ = run(members, 70)
-    newbie = Member(id=99, room="A4.15")
+    newbie = Member(id=99, room="E1.15")
     _, chosen, _ = run(members + [newbie], 15, START + timedelta(days=70), balances=balances)
     assert sum(99 in c for c in chosen) <= 3
 
 
 def test_room_natural_sort():
-    assert sorted(["A4.10", "A4.2", "A4.1"], key=room_key) == ["A4.1", "A4.2", "A4.10"]
+    assert sorted(["E1.10", "E1.2", "E1.1"], key=room_key) == ["E1.1", "E1.2", "E1.10"]
 
 
 def test_display_points_thirds():

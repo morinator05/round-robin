@@ -1,6 +1,6 @@
-# Round Robin A4
+# Round Robin
 
-Web app for the cleaning duties on dorm floor A4: assigns kitchen and trash duty fairly,
+Web app for the cleaning duties on a dorm floor: assigns kitchen and trash duty fairly,
 tracks who did it and gives strikes for missed duties. The UI is in English.
 
 ## Screenshots
@@ -68,7 +68,7 @@ it are reassigned immediately. Deleting the absence doesn't give them back.
 - Give and revoke strikes; run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
-- Room numbers like `A403`: building, floor, room 01–99.
+- Room numbers like `E103`: building, floor, room 01–99.
 
 **Daily job** (8:05): marks missed duties and gives the strikes, then assigns
 today's kitchen and this week's trash duty. Residents who become unavailable (away, paused,
@@ -94,7 +94,7 @@ In `.env`, see `.env.example`.
 | `POSTGRES_PASSWORD` | `a4` | Database password. Use a random one on a server. |
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
-| `FLOOR_NAME` | `A4` | Floor name in the header ("Round Robin A4"). |
+| `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
 | `DEADLINE_HOUR` | `8` | Deadline hour …; the next people are chosen right after it. |
 | `DEADLINE_DAYS_AFTER` | `1` | … this many days after the duty ends. |
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |

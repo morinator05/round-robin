@@ -103,7 +103,7 @@ def week_start(d: date) -> date:
 
 
 def room_key(room: str) -> tuple:
-    """Natural sort: "A4.2" before "A4.10"."""
+    """Natural sort: "E1.2" before "E1.10"."""
     return tuple(int(p) if p.isdigit() else p for p in re.split(r"(\d+)", room))
 
 
