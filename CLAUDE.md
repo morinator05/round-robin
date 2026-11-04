@@ -29,7 +29,8 @@ unreachable database is an error instead of a skip. The Docker image runs
 
 ## Architecture
 
-FastAPI with server-rendered Jinja templates and htmx (vendored, no JS build), async
+FastAPI with server-rendered Jinja templates and htmx (vendored, no JS build; the Overpass
+font is self-hosted in `app/static/fonts`, so pages make no outside requests), async
 SQLAlchemy on Postgres (asyncpg), APScheduler.
 
 **Fairness is computed, never stored.** `app/services/carpool.py` is pure (no DB) and

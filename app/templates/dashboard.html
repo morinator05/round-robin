@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ today|weekday }}, {{ today|long_date }}</h1>
-<div class="grid">
+<h1 class="date">{{ today|weekday }} {{ today|short_date }}</h1>
+<div class="grid duties">
   {% with trip=kitchen.trip, duty=kitchen.duty, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
@@ -12,7 +12,7 @@
 {% if not user %}<p class="muted"><a href="/login">Log in</a> to tick off duties.</p>{% endif %}
 
 <div class="grid">
-  <section>
+  <section class="preview">
     <h2>Kitchen duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
       {% for e in kitchen_preview %}
@@ -29,7 +29,7 @@
       {% endfor %}
     </table></div>
   </section>
-  <section>
+  <section class="preview">
     <h2>Trash duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
       {% for e in trash_preview %}

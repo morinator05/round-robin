@@ -1,186 +1,263 @@
+/* Pastel blue with purple for your own name. Barely rounded corners, panels with a light
+   shadow, rooms and statuses as small flat tags. */
+
+/* Overpass, self-hosted: no requests to Google. */
+@font-face {
+  font-family: "Overpass"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("fonts/overpass-latin-wght.woff2") format("woff2");
+}
+
 :root {
-  /* Pastel blue theme. Each colour has a "-soft" fill and a "-line" border, so pastel
-     elements still have a clear edge. */
-  --bg: #edf3fb; --card: #ffffff; --card-alt: #f3f7fd; --text: #1c2b42; --muted: #5c6f8a;
-  --border: #c6d7ec; --shadow: 0 1px 3px rgba(31, 63, 115, .10);
-  --nav-bg: #d6e6f8; --nav-hover: #c3d9f3;
+  /* Each colour has a "-soft" fill and a "-line" border, so pastel elements still have a
+     clear edge. */
+  --bg: #edf3fb; --card: #ffffff; --card-alt: #f5f8fd; --text: #1c2b42; --muted: #5c6f8a;
+  --border: #d3e0f0; --border-strong: #a9c3e6;
+  --shadow: 0 1px 2px rgba(31, 63, 115, .06), 0 4px 14px rgba(31, 63, 115, .07);
+  --nav-bg: #d6e6f8; --nav-hover: #c3d9f3; --nav-active: #ffffff;
   --accent: #2f66b0; --accent-soft: #cfe1f7; --accent-strong: #173f73; --accent-line: #8fb3e2;
-  --ok: #22703f; --ok-soft: #d9f2e2; --ok-line: #9fd4b3;
-  --warn: #b45309; --warn-soft: #fcefd2; --warn-line: #ebcb86;
-  --bad: #a83232; --bad-soft: #fbe1e1; --bad-line: #eba9a9;
-  --neutral: #56657c; --neutral-soft: #e7edf5; --neutral-line: #c4cfde;
-  --room: #4a5b74; --room-soft: #dfe7f2;
-  --me: #6b46c1; --me-room: #ebe3fb;
+  --room: #4a5b74; --room-soft: #e3eaf3;
+  --me: #6b46c1; --me-soft: #ece4fb;
+  --ok: #22703f; --ok-soft: #dcf2e4; --ok-line: #a7d7b9;
+  --warn: #b45309; --warn-soft: #fcf0d5; --warn-line: #ecce8e;
+  --bad: #a83232; --bad-soft: #fbe3e3; --bad-line: #ecb0b0;
+  --neutral: #56657c; --neutral-soft: #e9eef5; --neutral-line: #ccd6e3;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #111925; --card: #19222f; --card-alt: #1e2938; --text: #e2ebf7; --muted: #94a7c0;
-    --border: #2f4058; --shadow: 0 1px 3px rgba(0, 0, 0, .35);
-    --nav-bg: #1d2d44; --nav-hover: #284066;
+    --border: #2a394f; --border-strong: #3f5a7d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 14px rgba(0, 0, 0, .25);
+    --nav-bg: #1a2940; --nav-hover: #243a5a; --nav-active: #2c476d;
     --accent: #9cc4f2; --accent-soft: #284466; --accent-strong: #dbe9fb; --accent-line: #4a72a3;
+    --room: #b3c2d6; --room-soft: #2a3648;
+    --me: #c4b1f6; --me-soft: #382d57;
     --ok: #9adbb3; --ok-soft: #1c3a2a; --ok-line: #3a6b4e;
     --warn: #ffb066; --warn-soft: #3a2a1a; --warn-line: #7a5230;
     --bad: #f2a7a7; --bad-soft: #432427; --bad-line: #7a3f44;
     --neutral: #a9b6c8; --neutral-soft: #253244; --neutral-line: #3d4d64;
-    --room: #b3c2d6; --room-soft: #2a3648;
-    --me: #c4b1f6; --me-room: #382d57;
     color-scheme: dark;
   }
 }
-/* Square corners everywhere, also on browser defaults like buttons and date fields. */
-* { box-sizing: border-box; border-radius: 0; }
-body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
-main { max-width: 960px; margin: 0 auto; padding: 1rem; }
-a { color: var(--accent); }
-h1 { font-size: 1.5rem; margin: .5rem 0 1rem; }
-h2 { font-size: 1.15rem; margin: 1.5rem 0 .5rem; }
+
+* { box-sizing: border-box; }
+/* Just a hint of rounding (3px, 2px on small tags), the same on everything, also on browser
+   defaults like buttons and date fields. Never pill-shaped. */
+.card, .table-wrap, .flash, .panel, button, input, select, .badge, nav a { border-radius: 3px; }
+.room, .tag, .role, .help-link, form.row label.check input { border-radius: 2px; }
+/* A table inside a card: only the card's corners show. */
+.card .table-wrap { border-radius: 2px; }
+body { margin: 0; font: 16px/1.55 "Overpass", system-ui, sans-serif; background: var(--bg);
+       color: var(--text); }
+main { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+a { color: var(--accent); text-underline-offset: .15em; }
+h1 { font-size: 1.85rem; line-height: 1.2; font-weight: 800; letter-spacing: -.01em;
+     margin: .25rem 0 1.25rem; }
+h2 { font-size: 1.2rem; line-height: 1.3; font-weight: 700; margin: 2rem 0 .6rem; }
+h2 .muted { font-weight: 400; margin-left: .35rem; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-nav { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; padding: .5rem 1rem;
-      background: var(--nav-bg); border-bottom: 1px solid var(--accent-line); }
-nav a { color: var(--accent-strong); text-decoration: none; padding: .3rem .6rem; }
-nav a:hover { background: var(--nav-hover); }
-nav .brand { font-weight: 700; margin-right: .5rem; }
-nav form { margin: 0; }
-nav .nav-user { color: var(--muted); font-size: .9em; margin-left: auto; padding: 0 .5rem; }
-
-.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-.card { background: var(--card); border: 1px solid var(--border); padding: 1rem;
-        box-shadow: var(--shadow); }
-.card h2 { margin-top: 0; }
-/* Space between stacked cards; cards side by side in a .grid use its gap instead. */
-main > .card + .card { margin-top: 1rem; }
 .muted { color: var(--muted); font-size: .9em; }
-.penalty { color: var(--bad); font-weight: 600; }
-.strikes { font-weight: 600; }
+.penalty { color: var(--bad); font-weight: 700; }
+.strikes { font-weight: 700; }
 .strikes.ok { color: var(--ok); } .strikes.warn { color: var(--warn); } .strikes.bad { color: var(--bad); }
 
-/* People: the name comes first, the room is a smaller, quieter tag after it. */
+/* --- Navigation: the current page is highlighted in white. */
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1.25rem;
+      padding: .5rem 1rem; background: var(--nav-bg); border-bottom: 1px solid var(--border-strong); }
+nav a { color: var(--accent-strong); text-decoration: none; }
+nav .brand { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
+.brand-floor { color: var(--me); }
+.nav-links { display: flex; flex-wrap: wrap; gap: .2rem; }
+.nav-links a, .nav-user > a { padding: .35rem .7rem .25rem; }
+.nav-links a:hover, .nav-user > a:hover { background: var(--nav-hover); }
+nav a[aria-current="page"] { font-weight: 700; background: var(--nav-active);
+                             box-shadow: 0 1px 2px rgba(31, 63, 115, .1); }
+.nav-user { display: flex; align-items: center; gap: .4rem; margin-left: auto; font-size: .95rem; }
+.nav-user .muted { font-size: .85rem; }
+nav form { margin: 0; }
+
+/* --- People: the name comes first, the room is a smaller, quieter tag after it. Both sit
+   in one .who that doesn't wrap, so a name never ends up on another line than its room. */
+.who { white-space: nowrap; }
 .person-name { font-weight: 600; }
-.room { display: inline-block; font-size: .78em; font-weight: 500; line-height: 1.4;
-        padding: 0 .4em; vertical-align: middle;
-        color: var(--room); background: var(--room-soft); white-space: nowrap; }
-/* Small labels after a person, in the same shape as the room tag: role and paused state. */
-.tag { display: inline-block; font-size: .78em; font-weight: 500; line-height: 1.4;
-       padding: 0 .4em; vertical-align: middle; white-space: nowrap;
+.room { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
+        padding: .05em .55em 0; vertical-align: .1em; 
+        font-variant-numeric: tabular-nums; white-space: nowrap;
+        color: var(--room); background: var(--room-soft); }
+/* The logged-in user's own name, so you spot yourself at a glance. */
+.me, .me .person-name { color: var(--me); }
+.me .room { color: var(--me); background: var(--me-soft); }
+/* Small labels after a person, in the same shape as the room: role and paused state. */
+.tag { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
+       padding: .05em .55em 0; vertical-align: .1em; white-space: nowrap;
        color: var(--neutral); background: var(--neutral-soft); }
 .tag-admin { color: var(--accent-strong); background: var(--accent-soft); }
-/* The logged-in user's own name, so you spot yourself at a glance. */
-.me { color: var(--me); }
-.me .room { color: var(--me); background: var(--me-room); }
-/* Preview stand-in for today's pair, not a name: a framed tag in the outcome's colour,
-   green "✓ Done" and amber "✗ Skipped".
-   Its row gets a bar in the same colour, so you find the date at a glance. */
-.role { display: inline-block; font-weight: 600; line-height: 1.4; padding: 0 .45em;
-        white-space: nowrap; border: 1px solid; }
-.role-done { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
-.role-skip { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
-tr:has(.role-done) > td:first-child { box-shadow: inset 4px 0 var(--ok); color: var(--ok);
-                                       font-weight: 600; }
-tr:has(.role-skip) > td:first-child { box-shadow: inset 4px 0 var(--warn); color: var(--warn);
-                                       font-weight: 600; }
-tr:has(.role-done) > td, tr:has(.role-skip) > td { background: var(--card-alt); }
+
+/* --- Panels. */
+.grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--border);
+        padding: 1.25rem; box-shadow: var(--shadow); }
+.card h2 { margin-top: 0; }
+/* Space between stacked cards; cards side by side in a .grid use its gap instead. */
+main > .card + .card { margin-top: 1.25rem; }
+h1.date { font-variant-numeric: tabular-nums; }
+
+/* Today's duties: one row per person, name on the left, button or status on the right. */
 .person { display: flex; justify-content: space-between; align-items: center; gap: .5rem;
-          padding: .5rem 0; border-top: 1px solid var(--border); }
-.person:first-of-type { border-top: 0; }
+          padding: .6rem 0; border-top: 1px solid var(--border); }
+.person:first-of-type { border-top: 0; padding-top: .2rem; }
 .name { font-size: 1.1rem; }
+.duty .foot { margin: .6rem 0 0; padding-top: .6rem; border-top: 1px solid var(--border); }
+.duty .penalty { margin: 0 0 .5rem; }
 .assignee { display: flex; justify-content: space-between; align-items: center; gap: .75rem;
             padding: .15rem 0; }
 
-/* Same box as a button, so status and button line up next to each other. Tags are flat,
-   buttons have a shadow, so it's clear which one can be clicked. */
-.badge { display: inline-block; padding: .35rem .8rem; font: inherit; font-size: .9rem;
-         border: 1px solid var(--neutral-line); white-space: nowrap; text-align: center;
-         color: var(--neutral); background: var(--neutral-soft); }
-.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+/* Preview stand-in for today's pair, not a name: a small framed tag in the outcome's
+   colour, green "✓ Done" and amber "✗ Skipped", about the size of a name. The row's date
+   takes the same colour, nothing more. */
+.role { display: inline-block; font-size: .85em; font-weight: 600; line-height: 1.45;
+        padding: .05em .45em 0; vertical-align: .05em; white-space: nowrap; border: 1px solid; }
+.role-done { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+.role-skip { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+tr:has(.role-done) > td:first-child { color: var(--ok); }
+tr:has(.role-skip) > td:first-child { color: var(--warn); }
+/* The preview's date column: short, in even-width digits so the days line up. */
+.preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* --- Status tags. Same box as a button, so status and button line up next to each other.
+   Tags are flat, buttons are filled and slightly raised, so it's clear which one
+   can be clicked. */
+.badge { display: inline-block; padding: .4rem .8rem .3rem; font: inherit; font-size: .88rem;
+         line-height: 1.5; border: 1px solid var(--neutral-line); 
+         white-space: nowrap; text-align: center; color: var(--neutral); background: var(--neutral-soft); }
+.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); font-weight: 600; }
 .s-pending { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
 .s-missed { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
 .s-excused, .s-rode { color: var(--neutral); background: var(--neutral-soft);
-                         border-color: var(--neutral-line); }
+                      border-color: var(--neutral-line); }
 /* Every tag, and every button at the end of a line (in a list of people or a table's .end
    column), is as wide as the longest tag ("not needed"), whatever the font: an invisible,
    zero-height copy of it sets the width. Bold, so the buttons' heavier text fits as well. */
 .badge::before, .person button::before, td.end button::before {
   content: "not needed"; display: block; height: 0; overflow: hidden; visibility: hidden;
-  font-weight: 600; }
-/* The last column of a table, with tags or buttons: kept at the right edge. */
-th.end, td.end { text-align: right; white-space: nowrap; }
+  font-weight: 700; }
+/* After "Done" swaps the card in, its new "done" tag pops in. Only for the card swap
+   (htmx marks the swapped element .htmx-added), not for page navigation. */
+.duty .s-drove { transition: transform .28s cubic-bezier(.2, .9, .3, 1.2); }
+.duty.htmx-added .s-drove { transform: scale(1.15); }
+@media (prefers-reduced-motion: reduce) { .duty .s-drove { transition: none; } }
 
-/* Same font size, line height and vertical padding as the input fields, so both have the
-   same height, also when the inputs sit in a label with smaller text. */
-button { font: inherit; font-size: .9rem; line-height: 1.5; font-weight: 500; padding: .35rem .8rem;
-         cursor: pointer; box-shadow: var(--shadow);
-         border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent-strong); }
-button:hover { filter: brightness(.94); }
-button.secondary { background: var(--card); color: var(--accent); }
-button.danger { background: var(--bad-soft); color: var(--bad); border-color: var(--bad-line); }
-button.link { background: none; border: 0; padding: .3rem .6rem; box-shadow: none; color: var(--accent-strong); }
+/* --- Buttons. Same font size, line height and vertical padding as the input fields, so
+   both have the same height, also when the inputs sit in a label with smaller text. */
+button { font: inherit; font-size: .9rem; line-height: 1.5; font-weight: 700;
+         padding: .4rem .9rem .3rem; cursor: pointer;
+         border: 1px solid var(--accent-line); background: var(--accent-soft);
+         color: var(--accent-strong); box-shadow: 0 1px 2px rgba(31, 63, 115, .12);
+         transition: background-color .15s, border-color .15s; }
+button:hover { border-color: var(--accent); }
+button:active { transform: translateY(1px); box-shadow: none; }
+button.secondary { background: var(--card); color: var(--accent); border-color: var(--border-strong); }
+button.secondary:hover { background: var(--card-alt); border-color: var(--accent); }
+button.danger { background: var(--card); color: var(--bad); border-color: var(--bad-line); }
+button.danger:hover { background: var(--bad-soft); border-color: var(--bad); }
+button.link { background: none; border: 0; box-shadow: none; padding: .35rem .5rem;
+              color: var(--accent-strong); font-weight: 600; }
+button.link:hover { background: var(--nav-hover); }
 
-input, select { font: inherit; font-size: .9rem; line-height: 1.5; padding: .35rem .5rem; border: 1px solid var(--accent-line);
-         background: var(--card); color: var(--text); max-width: 100%; }
+/* --- Forms. */
+input, select { font: inherit; font-size: .9rem; line-height: 1.5; padding: .4rem .6rem .3rem;
+                border: 1px solid var(--border-strong);
+                background: var(--card); color: var(--text); max-width: 100%; }
+input:hover, select:hover { border-color: var(--accent-line); }
+input:focus-visible, select:focus-visible { outline: 0; border-color: var(--accent);
+                                            box-shadow: 0 0 0 3px var(--accent-soft); }
 /* Firefox ignores line-height on selects: line + padding + border, as computed for inputs. */
 select { height: calc(1.5em + .7rem + 2px); }
 form.inline { display: inline; margin: 0; }
-form.row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
-form.row label { display: flex; flex-direction: column; font-size: .85rem; color: var(--muted); }
+form.row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end; }
+form.row label { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem;
+                 font-weight: 600; color: var(--muted); }
+/* A checkbox next to inputs: as high as an input, so it lines up with them. */
+form.row label.check > span { display: flex; align-items: center; gap: .45rem;
+                              height: 2.175rem; cursor: pointer; font-size: .9rem;
+                              font-weight: 400; color: var(--text); }
+/* Own checkbox look in the theme colours: framed when off, filled with a tick when on. */
+form.row label.check input { appearance: none; display: grid; place-content: center;
+                             width: 1.1rem; height: 1.1rem; margin: 0; cursor: inherit;
+                             padding: 0;
+                             background: var(--card); border: 2px solid var(--accent-line); }
+form.row label.check input:checked { background: var(--accent); border-color: var(--accent); }
+form.row label.check input:checked::after { content: ""; width: .3rem; height: .6rem;
+  margin-top: -.15rem; border: solid var(--card); border-width: 0 2px 2px 0;
+  transform: rotate(45deg); }
+form.row label.check:has(input:checked) > span { color: var(--accent-strong); font-weight: 600; }
+form.row label.check:has(input:disabled) > span { color: var(--muted); cursor: default; }
+form.row label.grow { flex: 1 1 16rem; }
+form.row label.grow input { width: 100%; }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 
+/* --- Tables: a panel with hairline rows. */
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border);
               box-shadow: var(--shadow); }
 table { border-collapse: collapse; width: 100%; }
-th, td { text-align: left; padding: .45rem .7rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+th, td { text-align: left; padding: .55rem .8rem .45rem; border-bottom: 1px solid var(--border);
+         vertical-align: middle; }
 tr:last-child > td { border-bottom: 0; }
-th { font-size: .85rem; color: var(--muted); font-weight: 600; background: var(--card-alt); }
+th { font-size: .82rem; font-weight: 700; color: var(--muted); background: var(--card-alt);
+     white-space: nowrap; }
+tr:hover > td { background: var(--card-alt); }
+/* Numbers line up on the right, in even-width digits. */
+td.points, td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.points { font-weight: 600; }
+/* The last column of a table, with tags or buttons: kept at the right edge. */
+th.end, td.end { text-align: right; white-space: nowrap; }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
    a week ("Mon 27 Oct–2 Nov") is longer than a day. Narrow screens scroll sideways. */
 table.history { table-layout: fixed; min-width: 56rem; }
 table.history .col-date { width: 11rem; }
 table.history .col-action { width: 12rem; }
-
-.flash { padding: .6rem 1rem; margin-bottom: .5rem;
-         color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
-.flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
-details summary { cursor: pointer; }
-/* "?" after a heading: a small square link to that topic on the help page. */
-.help-link { display: inline-grid; place-content: center; width: 1.3em; height: 1.3em;
-             margin-left: .3rem; vertical-align: middle; font-size: .75rem; font-weight: 700;
-             text-decoration: none; color: var(--accent-strong); background: var(--accent-soft);
-             border: 1px solid var(--accent-line); }
-.help-link:hover { filter: brightness(.94); }
-/* Help page: one card per topic. */
-.card.help { margin-top: 1rem; }
-.card.help p { margin: 0 0 .6rem; }
-.card.help p:last-child { margin-bottom: 0; }
-.card.help .table-wrap { margin-top: .25rem; }
-h2 .muted { font-weight: 400; margin-left: .25rem; }
+/* Inside a card the table is part of the card: no second shadow. */
 .card .table-wrap { box-shadow: none; }
 .card form.row + .table-wrap { margin-top: 1rem; }
 .card .table-wrap + .actions { margin-top: 1rem; }
-.actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-/* A checkbox next to inputs: as high as an input, so it lines up with them. */
-form.row label.check > span { display: flex; align-items: center; gap: .45rem;
-                              height: 2.175rem; cursor: pointer; font-size: .9rem;
-                              color: var(--text); }
-/* Own checkbox look in the theme colours: framed when off, filled with a tick when on. */
-form.row label.check input { appearance: none; display: grid; place-content: center;
-                             width: 1.1rem; height: 1.1rem; margin: 0; cursor: inherit;
-                             background: var(--card); border: 2px solid var(--accent-line); }
-form.row label.check input:checked { background: var(--accent); border-color: var(--accent); }
-form.row label.check input:checked::after { content: ""; width: .3rem; height: .6rem;
-  margin-top: -.15rem; border: solid var(--card); border-width: 0 2px 2px 0; transform: rotate(45deg); }
-form.row label.check:has(input:checked) > span { color: var(--accent-strong); font-weight: 500; }
-form.row label.check:has(input:disabled) > span { color: var(--muted); cursor: default; }
-form.row label.grow { flex: 1 1 16rem; }
-form.row label.grow input { width: 100%; }
 
-/* Admin: "add a resident" and one line per resident, each folding out its forms. */
-details.add > summary { padding: .25rem 0 .75rem; color: var(--accent); font-weight: 500; }
+/* --- Messages after an action. */
+.flash { padding: .65rem 1rem .55rem; margin-bottom: .75rem;
+         color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
+.flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+
+/* --- "?" after a heading: a small square link to that topic on the help page. */
+.help-link { display: inline-grid; place-content: center; width: 1.4em; height: 1.4em;
+             margin-left: .35rem; vertical-align: .15em; font-size: .72rem; font-weight: 800;
+             text-decoration: none; color: var(--accent-strong);
+             background: var(--accent-soft); border: 1px solid var(--accent-line); }
+.help-link:hover { border-color: var(--accent); }
+/* Help page: one card per topic, lines kept readable. */
+.card.help { margin-top: 1.25rem; }
+.card.help p { margin: 0 0 .7rem; max-width: 68ch; }
+.card.help p:last-child { margin-bottom: 0; }
+.card.help .table-wrap { margin-top: .25rem; }
+main > p { max-width: 68ch; }
+
+/* --- Admin: "add a resident" and one line per resident, each folding out its forms. */
+details summary { cursor: pointer; }
+details.add > summary { padding: .25rem 0 .9rem; color: var(--accent); font-weight: 700; }
 details.resident { border-top: 1px solid var(--border); }
-details.resident > summary { padding: .5rem 0; }
+details.resident > summary { padding: .6rem 0 .5rem; }
 details.resident.inactive > summary { opacity: .6; }
-.panel { display: grid; gap: .75rem; padding: 0 0 1rem 1rem; }
+.panel { display: grid; gap: .75rem; margin: 0 0 1rem; padding: 1rem;
+         background: var(--card-alt); }
 /* The text fields share the whole width of the card; the room number only needs a short one. */
 .panel form.row label:not(.check) { flex: 2 1 9rem; }
 .panel form.row label.short { flex: 1 1 5rem; }
 .panel form.row label:not(.check) input { width: 100%; }
 .panel p { margin: 0; }
+
+/* --- Phones. */
+@media (max-width: 600px) {
+  h1 { font-size: 1.5rem; }
+  nav { gap: .2rem .5rem; }
+  nav .brand { width: 100%; padding: .2rem .1rem; }
+  .nav-links a { padding: .3rem .55rem .2rem; }
+  .nav-user { margin-left: 0; width: 100%; }
+}

@@ -37,16 +37,15 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 def person_html(user: User | None, is_me: bool = False) -> Markup:
     """A person as HTML: the first name stands out, the room is a quieter tag after it.
 
-    `is_me` highlights the logged-in user's own entry, so they find themselves quickly.
+    Both sit in one `.who` that doesn't wrap, so a name never ends up on another line than
+    its room. `is_me` highlights the logged-in user's own entry, so they find themselves
+    quickly.
     """
     if user is None:
         return Markup('<span class="muted">former resident</span>')
-    html = Markup('<span class="person-name">{}</span> <span class="room">{}</span>').format(
-        user.first_name, user.room_number
-    )
-    if is_me:
-        return Markup('<span class="me">{}</span>').format(html)
-    return html
+    return Markup(
+        '<span class="{}"><span class="person-name">{}</span> <span class="room">{}</span></span>'
+    ).format("who me" if is_me else "who", user.first_name, user.room_number)
 
 
 @pass_context
@@ -99,8 +98,8 @@ templates.env.filters["long_date"] = long_date
 templates.env.filters["date_time"] = lambda d: (
     f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}" if d else ""
 )
-# Points with their sign: "+37", "-112", "0".
-templates.env.filters["signed"] = lambda n: f"{n:+d}" if n else "0"
+# Points with their sign: "+37", "−112" (a real minus sign), "0".
+templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"
 templates.env.filters["weekday"] = lambda d: f"{d:%a}"
 
 

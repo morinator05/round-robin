@@ -583,7 +583,7 @@ async def test_stats_shows_whole_points(session, client):
     await session.commit()
     text = (await client.get("/stats")).text
     cells = re.findall(r'<td class="points">([^<]*)</td>', text)
-    kitchen = [int(c) for c in cells[::2]]
+    kitchen = [int(c.replace("\u2212", "-")) for c in cells[::2]]
     assert sorted(kitchen) == [-34, -33, 67]
     assert all(c == "0" for c in cells[1::2])
 

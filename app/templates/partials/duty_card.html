@@ -1,7 +1,7 @@
 {# One duty card on the dashboard. Expects: trip (or None), duty, deadline,
    can_mark_as_driver(potential driver).
    Also returned alone by the "Done" button, which swaps the card via htmx. #}
-<section class="card" id="card-{{ duty.value }}">
+<section class="card duty" id="card-{{ duty.value }}">
   <h2>
     {{ duty.label }}
     <span class="muted">
@@ -14,9 +14,7 @@
   {% else %}
     {% for pd in trip.potential_drivers %}
       <div class="person">
-        <div>
-          <div class="name">{{ person(pd.user) }}</div>
-        </div>
+        <div class="name">{{ person(pd.user) }}</div>
         {% if can_mark_as_driver(pd) %}
           <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-swap="outerHTML">Done</button>
@@ -27,10 +25,10 @@
     {% endfor %}
     {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
     {% if driver %}
-      <p class="muted">Done by {{ person(driver.user) }}
+      <p class="muted foot">Done by {{ person(driver.user) }}
         on {{ driver.completed_at|date_time }}</p>
     {% else %}
-      <p class="muted">Mark as done by {{ deadline|date_time }}</p>
+      <p class="muted foot">Mark as done by {{ deadline|date_time }}</p>
     {% endif %}
   {% endif %}
 </section>
