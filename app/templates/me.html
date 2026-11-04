@@ -1,60 +1,60 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>{{ person(user) }}</h1>
-{% if not user.active %}<p class="flash error">Du bist inaktiv und wirst nicht eingeteilt.</p>{% endif %}
+{% if not user.active %}<p class="flash error">You are inactive and won't be assigned any duties.</p>{% endif %}
 
 <div class="grid">
   <section class="card">
-    <h2>Abwesenheit {{ help_link("abwesend") }}</h2>
+    <h2>Away {{ help_link("away") }}</h2>
     <form method="post" action="/me/away" class="row">
-      <label>Von <input type="date" name="start_date" value="{{ today }}" required></label>
-      <label>Bis <input type="date" name="end_date" required></label>
-      <button>Eintragen</button>
+      <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
+      <label>To <input type="date" name="end_date" required></label>
+      <button>Add</button>
     </form>
     {% for a in aways %}
       <div class="person">
-        <span>{{ a.start_date.strftime("%d.%m.%Y") }} – {{ a.end_date.strftime("%d.%m.%Y") }}</span>
+        <span>{{ a.start_date|long_date }} – {{ a.end_date|long_date }}</span>
         <form method="post" action="/me/away/{{ a.id }}/delete" class="inline">
-          <button class="danger">Löschen</button>
+          <button class="danger">Delete</button>
         </form>
       </div>
     {% endfor %}
   </section>
 
   <section class="card">
-    <h2>Passwort ändern</h2>
+    <h2>Change password</h2>
     <form method="post" action="/me/password" class="row">
-      <label>Altes Passwort <input type="password" name="old_password" autocomplete="current-password" required></label>
-      <label>Neues Passwort <input type="password" name="new_password" autocomplete="new-password" minlength="{{ min_password_length }}" required></label>
-      <button>Ändern</button>
+      <label>Old password <input type="password" name="old_password" autocomplete="current-password" required></label>
+      <label>New password <input type="password" name="new_password" autocomplete="new-password" minlength="{{ min_password_length }}" required></label>
+      <button>Change</button>
     </form>
   </section>
 </div>
 
 {% set active = strikes|selectattr("is_active")|list %}
-<h2>Strikes {{ help_link("strikes") }} <span class="muted">{{ active|length }} aktiv</span></h2>
+<h2>Strikes {{ help_link("strikes") }} <span class="muted">{{ active|length }} active</span></h2>
 <div class="table-wrap"><table>
-  <tr><th>Datum</th><th>Grund</th><th class="end">Status</th></tr>
+  <tr><th>Date</th><th>Reason</th><th class="end">Status</th></tr>
   {% for s in strikes %}
     <tr>
       <td>{{ s.created_at|date_time }}</td>
       <td>{{ s.reason }}</td>
-      <td class="end">{% if s.revoked_at %}<span class="badge s-excused">zurückgenommen</span>
-          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">abgearbeitet</span>
-          {% else %}<span class="badge s-missed">aktiv</span>{% endif %}</td>
+      <td class="end">{% if s.revoked_at %}<span class="badge s-excused">revoked</span>
+          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">served</span>
+          {% else %}<span class="badge s-missed">active</span>{% endif %}</td>
     </tr>
-  {% else %}<tr><td class="muted" colspan="3">Keine Strikes.</td></tr>{% endfor %}
+  {% else %}<tr><td class="muted" colspan="3">No strikes.</td></tr>{% endfor %}
 </table></div>
 
-<h2>Meine letzten Dienste</h2>
+<h2>My recent duties</h2>
 <div class="table-wrap"><table>
-  <tr><th>Datum</th><th>Dienst</th><th class="end">Status</th></tr>
+  <tr><th>Date</th><th>Duty</th><th class="end">Status</th></tr>
   {% for pd in history %}
     <tr>
       <td>{{ pd.trip.start_date|weekday }} {{ pd.trip.start_date|short_date }}{% if pd.trip.end_date != pd.trip.start_date %}–{{ pd.trip.end_date|short_date }}{% endif %}</td>
-      <td>{{ pd.trip.duty.label }}{% if pd.trip.is_penalty %} <span class="penalty">(Strafe)</span>{% endif %}</td>
+      <td>{{ pd.trip.duty.label }}{% if pd.trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
       <td class="end">{% include "partials/status.html" %}</td>
     </tr>
-  {% else %}<tr><td class="muted" colspan="3">Noch keine Dienste.</td></tr>{% endfor %}
+  {% else %}<tr><td class="muted" colspan="3">No duties yet.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

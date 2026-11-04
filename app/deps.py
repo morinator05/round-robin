@@ -1,7 +1,7 @@
 """Request dependencies for the routes: database session and the logged-in user.
 
 FastAPI resolves these per request, similar to constructor injection. A route parameter
-`user: AdminUser` loads the logged-in user and also checks that they are the Flursprecher,
+`user: AdminUser` loads the logged-in user and also checks that they are the floor speaker,
 before the route body runs.
 """
 
@@ -43,13 +43,13 @@ async def require_user(user: Annotated[User | None, Depends(optional_user)]) -> 
 
 
 async def require_admin(user: Annotated[User, Depends(require_user)]) -> User:
-    """The logged-in user, who must be the Flursprecher (admin).
+    """The logged-in user, who must be the floor speaker (admin).
 
     Raises:
         HTTPException: 403 for everybody else.
     """
     if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Nur für den Flursprecher")
+        raise HTTPException(status_code=403, detail="Floor speaker only")
     return user
 
 

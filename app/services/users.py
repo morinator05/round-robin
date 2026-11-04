@@ -28,9 +28,7 @@ def check_room(room_number: str) -> str:
     """
     room_number = room_number.strip().upper()
     if not ROOM_PATTERN.fullmatch(room_number):
-        raise UserError(
-            f"Zimmer „{room_number}“ ungültig: Buchstabe, Stockwerk, Zimmer 01–99, z.B. A403"
-        )
+        raise UserError(f'Invalid room "{room_number}": letter, floor, room 01–99, e.g. A403')
     return room_number
 
 
@@ -57,12 +55,12 @@ async def create(
     """
     username = username.strip().lower()
     if not (name.strip() and room_number.strip() and username and password):
-        raise UserError("Alle Felder müssen ausgefüllt sein")
+        raise UserError("All fields are required")
     room_number = check_room(room_number)
     if len(password) < MIN_PASSWORD_LENGTH:
         raise UserError(PASSWORD_TOO_SHORT)
     if await session.scalar(select(User).where(User.username == username)):
-        raise UserError(f"Benutzername „{username}“ ist schon vergeben")
+        raise UserError(f'Username "{username}" is already taken')
     user = User(
         name=name.strip(),
         room_number=room_number,
@@ -77,7 +75,7 @@ async def create(
 
 
 async def create_initial_admin(session: AsyncSession) -> User | None:
-    """Create the Flursprecher from the `ADMIN_*` settings, if set and there are no users yet.
+    """Create the floor speaker from the `ADMIN_*` settings, if set and there are no users yet.
 
     Only an empty database counts, so an admin deleted later doesn't come back on restart.
 
@@ -114,7 +112,7 @@ async def delete(session: AsyncSession, user: User, today: date) -> None:
 
     Their open duties go to someone else.
     """
-    # Open penalty weeks go with the person, so those weeks get a regular Mülldienst again.
+    # Open penalty weeks go with the person, so those weeks get a regular trash duty again.
     open_penalties = await session.scalars(
         select(Trip)
         .join(Trip.potential_drivers)
@@ -141,9 +139,9 @@ async def add_away(session: AsyncSession, user: User, start: date, end: date, to
         UserError: if the period is reversed or already over.
     """
     if end < start:
-        raise UserError("Das Ende muss nach dem Anfang liegen")
+        raise UserError("The end can't be before the start")
     if end < today:
-        raise UserError("Abwesenheiten in der Vergangenheit ändern nichts mehr")
+        raise UserError("Away periods in the past don't change anything any more")
     session.add(AwayPeriod(user_id=user.id, start_date=start, end_date=end))
     await session.flush()
     session.expire_all()

@@ -24,13 +24,13 @@ class Settings(BaseSettings):
     # Potential drivers chosen for each trip (day / week); only one of them has to drive.
     kitchen_people_per_day: int = 2
     trash_people_per_week: int = 1
-    # Active strikes that turn into a penalty Mülldienst week.
+    # Active strikes that turn into a penalty trash week.
     strike_threshold: int = 3
     # How far ahead the dashboard preview looks.
     preview_days: int = 14
     # Off in tests, so no background job touches the test database.
     run_scheduler: bool = True
-    # Optional first Flursprecher, created on startup while there are no users at all.
+    # Optional first floor speaker, created on startup while there are no users at all.
     admin_username: str = ""
     admin_password: str = ""
     admin_name: str = ""

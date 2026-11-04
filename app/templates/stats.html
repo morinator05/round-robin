@@ -1,15 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Statistik {{ help_link("punkte") }}</h1>
+<h1>Statistics {{ help_link("points") }}</h1>
 <div class="table-wrap"><table>
   <tr>
     <th>Name</th>
-    <th>Küche erledigt</th><th>Küche verpasst</th><th>Küche Punkte</th>
-    <th>Müll erledigt</th><th>Müll Punkte</th><th>Straf-Mülldienste</th><th>Strikes</th>
+    <th>Kitchen done</th><th>Kitchen missed</th><th>Kitchen points</th>
+    <th>Trash done</th><th>Trash points</th><th>Penalty trash duties</th><th>Strikes</th>
   </tr>
   {% for u in users %}
     <tr{% if not u.active %} class="muted"{% endif %}>
-      <td>{{ person(u) }}{% if not u.active %} (inaktiv){% endif %}</td>
+      <td>{{ person(u) }}{% if not u.active %} (inactive){% endif %}</td>
       <td>{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
       <td>{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
       <td class="points">{{ points[Duty.kitchen][u.id]|signed }}</td>

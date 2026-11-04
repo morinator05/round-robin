@@ -31,8 +31,8 @@ class Duty(str, enum.Enum):
 
     @property
     def label(self) -> str:
-        """German name shown in the UI."""
-        return {"kitchen": "Küchendienst", "trash": "Mülldienst"}[self.value]
+        """Name shown in the UI."""
+        return {"kitchen": "Kitchen duty", "trash": "Trash duty"}[self.value]
 
 
 class Status(str, enum.Enum):
@@ -42,22 +42,22 @@ class Status(str, enum.Enum):
     pending = "pending"
     # This person drove (marked it done). Earns them the drive.
     drove = "drove"
-    # Deadline passed without anyone driving, or the Flursprecher disputed a "drove".
+    # Deadline passed without anyone driving, or the floor speaker disputed a "drove".
     missed = "missed"
-    # The Flursprecher let it go: no strike, but no drive either.
+    # The floor speaker let it go: no strike, but no drive either.
     excused = "excused"
     # Someone else drove the trip; this person just rode along.
     rode = "rode"
 
     @property
     def label(self) -> str:
-        """German name shown in the UI."""
+        """Name shown in the UI."""
         return {
-            "pending": "offen",
-            "drove": "erledigt",
-            "missed": "verpasst",
-            "excused": "entschuldigt",
-            "rode": "nicht nötig",
+            "pending": "open",
+            "drove": "done",
+            "missed": "missed",
+            "excused": "excused",
+            "rode": "not needed",
         }[self.value]
 
 
@@ -71,7 +71,7 @@ class User(Base):
     room_number: Mapped[str] = mapped_column(String(20))
     username: Mapped[str] = mapped_column(String(50), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
-    # The Flursprecher, who can manage residents, strikes and everybody's duties.
+    # The floor speaker, who can manage residents, strikes and everybody's duties.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     # Inactive users are paused: they don't ride, so they are never chosen and owe nothing.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -162,10 +162,10 @@ class PotentialDriver(Base):
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     status: Mapped[Status] = mapped_column(Enum(Status, name="status"), default=Status.pending)
-    # When and by whom it was marked done or excused (the Flursprecher can do it for others).
+    # When and by whom it was marked done or excused (the floor speaker can do it for others).
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    # Set when the Flursprecher found it was marked done but not actually done.
+    # Set when the floor speaker found it was marked done but not actually done.
     disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     trip: Mapped[Trip] = relationship(back_populates="potential_drivers")
@@ -174,14 +174,14 @@ class PotentialDriver(Base):
 
 
 class Strike(Base):
-    """A strike against a resident. Enough active ones give a penalty Mülldienst week."""
+    """A strike against a resident. Enough active ones give a penalty trash week."""
 
     __tablename__ = "strikes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     reason: Mapped[str] = mapped_column(Text)
-    # Given by the daily job for a missed duty (not by the Flursprecher).
+    # Given by the daily job for a missed duty (not by the floor speaker).
     auto: Mapped[bool] = mapped_column(Boolean, default=False)
     # The duty it was given for, if any. Marking that duty done revokes the strike.
     potential_driver_id: Mapped[int | None] = mapped_column(
@@ -189,9 +189,9 @@ class Strike(Base):
     )
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    # Set when the Flursprecher took it back, or the duty was done or excused after all.
+    # Set when the floor speaker took it back, or the duty was done or excused after all.
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Set when the strike was "paid off" by a penalty Mülldienst (that penalty trip).
+    # Set when the strike was "paid off" by a penalty trash duty (that penalty trip).
     redeemed_by_trip_id: Mapped[int | None] = mapped_column(
         ForeignKey("trips.id", ondelete="SET NULL")
     )

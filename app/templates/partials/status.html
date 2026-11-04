@@ -1,3 +1,3 @@
-{# Status tag of potential driver `pd`. A disputed one is shown as "beanstandet", not "verpasst". #}
-{% if pd.disputed_at %}<span class="badge s-missed">beanstandet</span>
+{# Status tag of potential driver `pd`. A disputed one is shown as "disputed", not "missed". #}
+{% if pd.disputed_at %}<span class="badge s-missed">disputed</span>
 {%- else %}<span class="badge s-{{ pd.status.value }}">{{ pd.status.label }}</span>{% endif %}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ today|weekday }}, {{ today.strftime("%d.%m.%Y") }}</h1>
+<h1>{{ today|weekday }}, {{ today|long_date }}</h1>
 <div class="grid">
   {% with trip=kitchen.trip, duty=kitchen.duty, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver %}
     {% include "partials/duty_card.html" %}
@@ -9,11 +9,11 @@
     {% include "partials/duty_card.html" %}
   {% endwith %}
 </div>
-{% if not user %}<p class="muted"><a href="/login">Anmelden</a>, um Dienste abzuhaken.</p>{% endif %}
+{% if not user %}<p class="muted"><a href="/login">Log in</a> to tick off duties.</p>{% endif %}
 
 <div class="grid">
   <section>
-    <h2>Küchendienst – Vorschau {{ help_link("vorschau") }}</h2>
+    <h2>Kitchen duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
       {% for e in kitchen_preview %}
         <tr>
@@ -23,20 +23,20 @@
       {% endfor %}
       {% for r in kitchen_later %}
         <tr>
-          <td class="muted">später</td>
-          <td>{{ role(r) }} <span class="muted">(erst nach dem {{ kitchen_preview[-1].start|short_date }})</span></td>
+          <td class="muted">later</td>
+          <td>{{ role(r) }} <span class="muted">(not before {{ kitchen_preview[-1].start|short_date }})</span></td>
         </tr>
       {% endfor %}
     </table></div>
   </section>
   <section>
-    <h2>Mülldienst – Vorschau {{ help_link("vorschau") }}</h2>
+    <h2>Trash duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
       {% for e in trash_preview %}
         <tr>
           <td>{{ e.start|short_date }}–{{ e.end|short_date }}</td>
           <td>{% for uid in e.potential_drivers %}{{ person(users_by_id[uid]) }}{% else %}<span class="muted">–</span>{% endfor %}
-              {% if e.is_penalty %}<span class="penalty">(Straf-Mülldienst)</span>{% endif %}</td>
+              {% if e.is_penalty %}<span class="penalty">(penalty trash duty)</span>{% endif %}</td>
         </tr>
       {% endfor %}
     </table></div>

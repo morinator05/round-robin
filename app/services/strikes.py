@@ -1,4 +1,4 @@
-"""Strikes, and the penalty Mülldienst week they turn into."""
+"""Strikes, and the penalty trash week they turn into."""
 
 from datetime import date, datetime, timedelta
 
@@ -50,7 +50,7 @@ async def issue(
         today: Used to find the penalty week (the first free one after this week).
         auto: True when the daily job gives it for a missed duty.
         potential_driver_id: The duty it is for, so doing that duty later can revoke it.
-        issued_by_id: The Flursprecher who gave it, if given by hand.
+        issued_by_id: The floor speaker who gave it, if given by hand.
     """
     strike = Strike(
         user_id=user_id,
@@ -66,7 +66,7 @@ async def issue(
 
 
 async def revoke(session: AsyncSession, strike: Strike, now: datetime) -> None:
-    """The Flursprecher takes a strike back."""
+    """The floor speaker takes a strike back."""
     strike.revoked_at = now
     await session.flush()
 
@@ -90,9 +90,9 @@ async def next_free_penalty_week(session: AsyncSession, user_id: int, today: dat
 
 
 async def check_threshold(session: AsyncSession, user_id: int, today: date) -> Trip | None:
-    """Turn `strike_threshold` active strikes into a penalty Mülldienst week.
+    """Turn `strike_threshold` active strikes into a penalty trash week.
 
-    The penalty trip replaces the regular Mülldienst of that week; the user is its only
+    The penalty trip replaces the regular trash duty of that week; the user is its only
     potential driver. The oldest strikes are marked as paid off by it, so they no longer
     count.
 

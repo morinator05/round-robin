@@ -21,7 +21,7 @@ async def daily_tick(session: AsyncSession, now: datetime) -> None:
     """Strike overdue duties, then make sure today's and this week's trips have potential drivers.
 
     Safe to run any number of times; it also commits. Runs on a schedule, on startup,
-    from the Flursprecher page, and from the dashboard if today's trips are missing.
+    from the admin page, and from the dashboard if today's trips are missing.
     """
     # Serialize ticks (scheduler, startup and page loads may race).
     await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DAILY_TICK_LOCK_ID})
