@@ -30,7 +30,7 @@
           <strong>{{ person(c.user) }}</strong>
           <div class="muted">marked {{ c.completed_at|date_time }}
             {% if c.completed_by and c.completed_by_id != c.user_id %}by {{ person(c.completed_by) }}{% endif %}</div>
-          {% if c.disputed_at %}<div class="penalty">disputed {{ c.disputed_at|date_time }}</div>{% endif %}
+          {% if c.disputed_at %}<div class="disputed">disputed {{ c.disputed_at|date_time }}</div>{% endif %}
         {% else %}<span class="muted">nobody</span>{% endif %}
       </td>
       {% if user.is_admin %}

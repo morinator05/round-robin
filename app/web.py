@@ -179,7 +179,7 @@ async def logout(request: Request):
 
 @router.get("/")
 async def dashboard(
-    request: Request, session: Session, user: OptionalUser, cleaner: int | None = None
+    request: Request, session: Session, user: OptionalUser, cleaner: str | None = None
 ):
     """Today's duties and the preview; visible without login.
 
@@ -202,9 +202,11 @@ async def dashboard(
     people = await users_by_id(session)
 
     choices = [uid for uid in kitchen_preview.plans if uid is not None]
-    if cleaner not in kitchen_preview.plans:
-        cleaner = user.id if user and user.id in choices else next(iter(kitchen_preview.plans))
-    kitchen_plan = kitchen_preview.plans[cleaner]
+    # Lenient: anything that isn't one of the choices (also "abc") shows the default.
+    chosen = int(cleaner) if cleaner and cleaner.isdigit() else None
+    if chosen not in kitchen_preview.plans:
+        chosen = user.id if user and user.id in choices else next(iter(kitchen_preview.plans))
+    kitchen_plan = kitchen_preview.plans[chosen]
     # The open trip's potential drivers who aren't up again within the plan (usually
     # whoever cleans): said below it, so nobody wonders where they went.
     shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
@@ -217,7 +219,7 @@ async def dashboard(
         trash=duty_card_ctx(trash, Duty.trash, user),
         kitchen_plan=kitchen_plan,
         kitchen_choices=[people[uid] for uid in choices if uid in people],
-        kitchen_cleaner=cleaner,
+        kitchen_cleaner=chosen,
         kitchen_open_start=kitchen_preview.open_start,
         kitchen_later=later,
         trash_plan=next(iter(trash_preview.plans.values())),
@@ -230,7 +232,9 @@ async def mark_as_driver(
     request: Request, session: Session, user: CurrentUser, potential_driver_id: int
 ):
     """Mark who drove (did the duty), from the dashboard card or the admin page."""
-    # The dashboard card posts with `card=1` and swaps only itself with the response.
+    # The dashboard card posts with `card=1`. On success it gets the dashboard again and
+    # takes its own card and the previews from it (hx-select / hx-select-oob), so the
+    # preview shows the now known outcome too.
     is_card_request = bool(request.headers.get("HX-Request") and request.query_params.get("card"))
     try:
         pd = await duties.get_potential_driver(session, potential_driver_id)
@@ -239,16 +243,11 @@ async def mark_as_driver(
     except DutyError as e:
         flash(request, str(e), "error")
         if is_card_request:
-            # A redirect would put the whole page into the card; reload so the flash shows.
+            # The card would drop the error message; reload the page so the flash shows.
             return Response(headers={"HX-Refresh": "true"})
         return redirect(safe_next(request.query_params.get("next")))
     if is_card_request:
-        trip = await duties.get_trip(session, pd.trip.duty, pd.trip.start_date)
-        return templates.TemplateResponse(
-            request,
-            "partials/duty_card.html",
-            {**duty_card_ctx(trip, trip.duty, user), "user": user},
-        )
+        return redirect("/")
     flash(request, "Marked as done")
     return redirect(safe_next(request.query_params.get("next")))
 

@@ -11,19 +11,23 @@
       <label>To <input type="date" name="end_date" required></label>
       <button>Add</button>
     </form>
+    <div class="away-list">
     {% for a in aways %}
       <div class="person">
-        <span>{{ a.start_date|long_date }} – {{ a.end_date|long_date }}</span>
+        <span>{{ a.start_date|long_date }}–{{ a.end_date|long_date }}</span>
         <form method="post" action="/me/away/{{ a.id }}/delete" class="inline">
           <button class="danger">Delete</button>
         </form>
       </div>
+    {% else %}
+      <p class="muted">Not away.</p>
     {% endfor %}
+    </div>
   </section>
 
   <section class="card">
     <h2>Change password</h2>
-    <form method="post" action="/me/password" class="row">
+    <form method="post" action="/me/password" class="row stack">
       <label>Old password <input type="password" name="old_password" autocomplete="current-password" required></label>
       <label>New password <input type="password" name="new_password" autocomplete="new-password" minlength="{{ min_password_length }}" required></label>
       <button>Change</button>

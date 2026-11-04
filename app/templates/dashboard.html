@@ -9,7 +9,7 @@
     {% include "partials/duty_card.html" %}
   {% endwith %}
 </div>
-{% if not user %}<p class="muted"><a href="/login">Log in</a> to tick off duties.</p>{% endif %}
+{% if not user %}<p class="muted"><a href="/login">Log in</a> to mark duties as done.</p>{% endif %}
 
 <div class="grid">
   {# While nobody has driven today's kitchen trip, there is one plan per person who could
@@ -18,10 +18,10 @@
     <h2>Kitchen duty – preview {{ help_link("preview") }}</h2>
     {% if kitchen_choices|length > 1 %}
       {% set is_today = kitchen_open_start == today %}
-      <div class="plan-switch">
-        <span class="muted">Depends on who {{ "cleans today" if is_today else "cleaned on " ~ (kitchen_open_start|weekday) ~ " " ~ (kitchen_open_start|short_date) }}:</span>
+      <div class="plan-switch" role="group" aria-labelledby="plan-switch-label">
+        <span class="muted" id="plan-switch-label">The plan depends on who {{ "cleans today" if is_today else "cleaned on " ~ (kitchen_open_start|weekday) ~ " " ~ (kitchen_open_start|short_date) }}:</span>
         {% for u in kitchen_choices %}
-          <a href="/?cleaner={{ u.id }}" hx-get="/?cleaner={{ u.id }}" hx-select="#kitchen-preview"
+          <a id="plan-{{ u.id }}" href="/?cleaner={{ u.id }}" hx-get="/?cleaner={{ u.id }}" hx-select="#kitchen-preview"
              hx-target="#kitchen-preview" hx-swap="outerHTML" hx-push-url="true"
              {% if u.id == kitchen_cleaner %}aria-current="true"{% endif %}>
             {%- if user and u.id == user.id %}If you {{ "clean" if is_today else "cleaned" }}
@@ -37,7 +37,7 @@
           <td>{% for uid in e.potential_drivers %}{{ person(users_by_id[uid]) }}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">–</span>{% endfor %}</td>
         </tr>
       {% endfor %}
-      {% for u in kitchen_later %}
+      {% for u in kitchen_later if kitchen_plan %}
         <tr>
           <td class="muted">later</td>
           <td>{{ person(u) }} <span class="muted">(after {{ kitchen_plan[-1].start|short_date }})</span></td>
@@ -45,7 +45,7 @@
       {% endfor %}
     </table></div>
   </section>
-  <section class="preview">
+  <section class="preview" id="trash-preview">
     <h2>Trash duty – preview {{ help_link("preview") }}</h2>
     <div class="table-wrap"><table>
       {% for e in trash_plan %}

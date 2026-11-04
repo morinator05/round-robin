@@ -10,15 +10,17 @@
 :root {
   /* Each colour has a "-soft" fill and a "-line" border, so pastel elements still have a
      clear edge. */
-  --bg: #edf3fb; --card: #ffffff; --card-alt: #f5f8fd; --text: #1c2b42; --muted: #5c6f8a;
+  --bg: #edf3fb; --card: #ffffff; --card-alt: #f5f8fd; --text: #1c2b42; --muted: #536580;
   --border: #d3e0f0; --border-strong: #a9c3e6;
+  /* Input frames: dark enough to see where to type (3:1). */
+  --field-line: #6f8fbb;
   --shadow: 0 1px 2px rgba(31, 63, 115, .06), 0 4px 14px rgba(31, 63, 115, .07);
   --nav-bg: #d6e6f8; --nav-hover: #c3d9f3; --nav-active: #ffffff;
   --accent: #2f66b0; --accent-soft: #cfe1f7; --accent-strong: #173f73; --accent-line: #8fb3e2;
   --room: #4a5b74; --room-soft: #e3eaf3;
   --me: #6b46c1; --me-soft: #ece4fb;
   --ok: #22703f; --ok-soft: #dcf2e4; --ok-line: #a7d7b9;
-  --warn: #b45309; --warn-soft: #fcf0d5; --warn-line: #ecce8e;
+  --warn: #a64b07; --warn-soft: #fcf0d5; --warn-line: #ecce8e;
   --bad: #a83232; --bad-soft: #fbe3e3; --bad-line: #ecb0b0;
   --neutral: #56657c; --neutral-soft: #e9eef5; --neutral-line: #ccd6e3;
   color-scheme: light;
@@ -27,6 +29,7 @@
   :root {
     --bg: #111925; --card: #19222f; --card-alt: #1e2938; --text: #e2ebf7; --muted: #94a7c0;
     --border: #2a394f; --border-strong: #3f5a7d;
+    --field-line: #56759c;
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 14px rgba(0, 0, 0, .25);
     --nav-bg: #1a2940; --nav-hover: #243a5a; --nav-active: #2c476d;
     --accent: #9cc4f2; --accent-soft: #284466; --accent-strong: #dbe9fb; --accent-line: #4a72a3;
@@ -43,10 +46,9 @@
 * { box-sizing: border-box; }
 /* Just a hint of rounding (3px, 2px on small tags), the same on everything, also on browser
    defaults like buttons and date fields. Never pill-shaped. */
-.card, .table-wrap, .flash, .panel, button, input, select, .badge, nav a { border-radius: 3px; }
+.card, .table-wrap, .flash, .panel, button, input, select, .badge, nav a, .plan-switch a {
+  border-radius: 3px; }
 .room, .tag, .help-link, form.row label.check input { border-radius: 2px; }
-/* A table inside a card: only the card's corners show. */
-.card .table-wrap { border-radius: 2px; }
 body { margin: 0; font: 16px/1.55 "Overpass", system-ui, sans-serif; background: var(--bg);
        color: var(--text); }
 main { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
@@ -58,6 +60,7 @@ h2 .muted { font-weight: 400; margin-left: .35rem; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .muted { color: var(--muted); font-size: .9em; }
 .penalty { color: var(--bad); font-weight: 700; }
+.disputed { color: var(--bad); }
 .strikes { font-weight: 700; }
 .strikes.ok { color: var(--ok); } .strikes.warn { color: var(--warn); } .strikes.bad { color: var(--bad); }
 
@@ -70,8 +73,8 @@ nav .brand { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
 .nav-links { display: flex; flex-wrap: wrap; gap: .2rem; }
 .nav-links a, .nav-user > a { padding: .35rem .7rem .25rem; }
 .nav-links a:hover, .nav-user > a:hover { background: var(--nav-hover); }
-nav a[aria-current="page"] { font-weight: 700; background: var(--nav-active);
-                             box-shadow: 0 1px 2px rgba(31, 63, 115, .1); }
+nav a[aria-current="page"], nav a[aria-current="page"]:hover {
+  font-weight: 700; background: var(--nav-active); box-shadow: 0 1px 2px rgba(31, 63, 115, .1); }
 .nav-user { display: flex; align-items: center; gap: .4rem; margin-left: auto; font-size: .95rem; }
 .nav-user .muted { font-size: .85rem; }
 nav form { margin: 0; }
@@ -81,13 +84,13 @@ nav form { margin: 0; }
 .who { white-space: nowrap; }
 .person-name { font-weight: 600; }
 .room { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
-        padding: .05em .55em 0; vertical-align: .1em; 
+        padding: .05em .55em 0; vertical-align: .1em;
         font-variant-numeric: tabular-nums; white-space: nowrap;
         color: var(--room); background: var(--room-soft); }
 /* The logged-in user's own name, so you spot yourself at a glance. */
-.me, .me .person-name { color: var(--me); }
+.me { color: var(--me); }
 .me .room { color: var(--me); background: var(--me-soft); }
-/* Small labels after a person, in the same shape as the room: role and paused state. */
+/* Small labels after a person, in the same shape as the room: "floor speaker", "inactive". */
 .tag { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
        padding: .05em .55em 0; vertical-align: .1em; white-space: nowrap;
        color: var(--neutral); background: var(--neutral-soft); }
@@ -101,6 +104,10 @@ nav form { margin: 0; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
+/* My profile: the away periods under the form. */
+.away-list { margin-top: .9rem; border-top: 1px solid var(--border); }
+.away-list .person:first-of-type { padding-top: .6rem; }
+.away-list > p { margin: .6rem 0 0; }
 
 /* Today's duties: one row per person, name on the left, button or status on the right. */
 .person { display: flex; justify-content: space-between; align-items: center; gap: .5rem;
@@ -117,26 +124,25 @@ h1.date { font-variant-numeric: tabular-nums; }
 .plan-switch { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .6rem; }
 .plan-switch .muted { flex-basis: 100%; }
 .plan-switch a { padding: .25rem .65rem .15rem; border: 1px solid var(--border-strong);
-                 border-radius: 3px; background: var(--card); color: var(--accent);
+                 background: var(--card); color: var(--accent);
                  text-decoration: none; font-size: .9rem; }
 .plan-switch a:hover { border-color: var(--accent); }
 .plan-switch a[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent-line);
                                       color: var(--accent-strong); font-weight: 700; }
-.plan-switch .room { font-size: .8em; }
+/* The room inside a choice: just the number, in the link's own colour. */
+.plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* --- Status tags. Same box as a button, so status and button line up next to each other.
-   Tags are flat, buttons are filled and slightly raised, so it's clear which one
-   can be clicked. */
+   Tags are flat and unframed (the border is transparent, so the size stays the same),
+   buttons are framed and slightly raised, so it's clear which one can be clicked. */
 .badge { display: inline-block; padding: .4rem .8rem .3rem; font: inherit; font-size: .88rem;
-         line-height: 1.5; border: 1px solid var(--neutral-line); 
-         white-space: nowrap; text-align: center; color: var(--neutral); background: var(--neutral-soft); }
-.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); font-weight: 600; }
-.s-pending { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
-.s-missed { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
-.s-excused, .s-rode { color: var(--neutral); background: var(--neutral-soft);
-                      border-color: var(--neutral-line); }
+         line-height: 1.5; border: 1px solid transparent; white-space: nowrap; text-align: center;
+         color: var(--neutral); background: var(--neutral-soft); }
+.s-drove { color: var(--ok); background: var(--ok-soft); font-weight: 600; }
+.s-pending { color: var(--warn); background: var(--warn-soft); }
+.s-missed { color: var(--bad); background: var(--bad-soft); }
 /* Every tag, and every button at the end of a line (in a list of people or a table's .end
    column), is as wide as the longest tag ("not needed"), whatever the font: an invisible,
    zero-height copy of it sets the width. Bold, so the buttons' heavier text fits as well. */
@@ -168,11 +174,13 @@ button.link:hover { background: var(--nav-hover); }
 
 /* --- Forms. */
 input, select { font: inherit; font-size: .9rem; line-height: 1.5; padding: .4rem .6rem .3rem;
-                border: 1px solid var(--border-strong);
+                border: 1px solid var(--field-line);
                 background: var(--card); color: var(--text); max-width: 100%; }
-input:hover, select:hover { border-color: var(--accent-line); }
+input:hover, select:hover { border-color: var(--accent); }
+/* Focus: the accent border plus a 1px ring, a solid 2px frame. */
 input:focus-visible, select:focus-visible { outline: 0; border-color: var(--accent);
-                                            box-shadow: 0 0 0 3px var(--accent-soft); }
+                                            box-shadow: 0 0 0 1px var(--accent); }
+::placeholder { color: var(--muted); opacity: 1; }
 /* Firefox ignores line-height on selects: line + padding + border, as computed for inputs. */
 select { height: calc(1.5em + .7rem + 2px); }
 form.inline { display: inline; margin: 0; }
@@ -187,7 +195,7 @@ form.row label.check > span { display: flex; align-items: center; gap: .45rem;
 form.row label.check input { appearance: none; display: grid; place-content: center;
                              width: 1.1rem; height: 1.1rem; margin: 0; cursor: inherit;
                              padding: 0;
-                             background: var(--card); border: 2px solid var(--accent-line); }
+                             background: var(--card); border: 2px solid var(--field-line); }
 form.row label.check input:checked { background: var(--accent); border-color: var(--accent); }
 form.row label.check input:checked::after { content: ""; width: .3rem; height: .6rem;
   margin-top: -.15rem; border: solid var(--card); border-width: 0 2px 2px 0;
@@ -196,6 +204,9 @@ form.row label.check:has(input:checked) > span { color: var(--accent-strong); fo
 form.row label.check:has(input:disabled) > span { color: var(--muted); cursor: default; }
 form.row label.grow { flex: 1 1 16rem; }
 form.row label.grow input { width: 100%; }
+/* Login and password: one field under the other, full width of a narrow card. */
+form.stack { flex-direction: column; align-items: stretch; max-width: 22rem; }
+form.stack button { align-self: flex-start; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 
 /* --- Tables: a panel with hairline rows. */
@@ -208,18 +219,23 @@ tr:last-child > td { border-bottom: 0; }
 th { font-size: .82rem; font-weight: 700; color: var(--muted); background: var(--card-alt);
      white-space: nowrap; }
 tr:hover > td { background: var(--card-alt); }
+/* Dates (always the first column) never wrap. */
+td:first-child { white-space: nowrap; }
+/* Muted rows (inactive residents, revoked strikes) keep the normal text size. */
+tr.muted { font-size: inherit; }
 /* Numbers line up on the right, in even-width digits. */
 td.points, td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 td.points { font-weight: 600; }
 /* The last column of a table, with tags or buttons: kept at the right edge. */
 th.end, td.end { text-align: right; white-space: nowrap; }
+td.end form.inline + form.inline { margin-left: .4rem; }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
    a week ("Mon 27 Oct–2 Nov") is longer than a day. Narrow screens scroll sideways. */
 table.history { table-layout: fixed; min-width: 56rem; }
 table.history .col-date { width: 11rem; }
 table.history .col-action { width: 12rem; }
-/* Inside a card the table is part of the card: no second shadow. */
-.card .table-wrap { box-shadow: none; }
+/* Inside a card the table is part of the card: no second shadow, only the card's corners. */
+.card .table-wrap { box-shadow: none; border-radius: 2px; }
 .card form.row + .table-wrap { margin-top: 1rem; }
 .card .table-wrap + .actions { margin-top: 1rem; }
 
@@ -234,6 +250,9 @@ table.history .col-action { width: 12rem; }
              text-decoration: none; color: var(--accent-strong);
              background: var(--accent-soft); border: 1px solid var(--accent-line); }
 .help-link:hover { border-color: var(--accent); }
+/* A bigger area to tap than it looks. */
+.help-link { position: relative; }
+.help-link::after { content: ""; position: absolute; inset: -6px; }
 /* Help page: one card per topic, lines kept readable. */
 .card.help { margin-top: 1.25rem; }
 .card.help p { margin: 0 0 .7rem; max-width: 68ch; }
@@ -246,14 +265,14 @@ details summary { cursor: pointer; }
 details.add > summary { padding: .25rem 0 .9rem; color: var(--accent); font-weight: 700; }
 details.resident { border-top: 1px solid var(--border); }
 details.resident > summary { padding: .6rem 0 .5rem; }
-details.resident.inactive > summary { opacity: .6; }
+/* Paused residents: the name steps back; the "inactive" tag says why. */
+details.resident.inactive .person-name { color: var(--muted); font-weight: 400; }
 .panel { display: grid; gap: .75rem; margin: 0 0 1rem; padding: 1rem;
          background: var(--card-alt); }
 /* The text fields share the whole width of the card; the room number only needs a short one. */
 .panel form.row label:not(.check) { flex: 2 1 9rem; }
 .panel form.row label.short { flex: 1 1 5rem; }
 .panel form.row label:not(.check) input { width: 100%; }
-.panel p { margin: 0; }
 
 /* --- Phones. */
 @media (max-width: 600px) {
@@ -262,4 +281,10 @@ details.resident.inactive > summary { opacity: .6; }
   nav .brand { width: 100%; padding: .2rem .1rem; }
   .nav-links a { padding: .3rem .55rem .2rem; }
   .nav-user { margin-left: 0; width: 100%; }
+  /* History: narrower columns, a week's date may take two lines. */
+  table.history { min-width: 38rem; }
+  table.history .col-date { width: 6.5rem; }
+  table.history .col-action { width: 7.5rem; }
+  table.history td:first-child { white-space: normal; }
+  .card .table-wrap table { min-width: 36rem; }
 }

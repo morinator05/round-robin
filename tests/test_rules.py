@@ -599,7 +599,7 @@ async def test_dashboard_switches_between_plans(session, client):
         return re.findall(r'cleaner=(\d+)"[^>]*\n?[^>]*aria-current="true"', text)
 
     text = (await client.get("/")).text
-    assert "Depends on who cleans today" in text
+    assert "The plan depends on who cleans today" in text
     assert current(text) == [str(p1.id)]
     text = (await client.get(f"/?cleaner={p2.id}")).text
     assert current(text) == [str(p2.id)]
@@ -607,6 +607,62 @@ async def test_dashboard_switches_between_plans(session, client):
     await login(client, p2.username)
     assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
     assert "If you clean" in (await client.get("/")).text
+    # Anything that isn't an id falls back too, instead of an error page.
+    r = await client.get("/?cleaner=abc")
+    assert r.status_code == 200 and current(r.text) == [str(p2.id)]
+
+
+async def test_switching_plans_shows_different_tables(session, client):
+    people = await make_users(session, n=6)
+    _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+
+    def kitchen_preview(text):
+        start = text.index('id="kitchen-preview"')
+        return text[start : text.index("</section>", start)]
+
+    headers = {"HX-Request": "true"}
+    one = (await client.get(f"/?cleaner={p1.id}", headers=headers)).text
+    two = (await client.get(f"/?cleaner={p2.id}", headers=headers)).text
+    # The tables differ (the switch itself aside): whoever doesn't clean is up tomorrow.
+    assert (
+        kitchen_preview(one).split("</table>")[0].split("<table>")[1]
+        != (kitchen_preview(two).split("</table>")[0].split("<table>")[1])
+    )
+
+
+async def test_done_on_the_card_updates_card_and_preview(session, client):
+    people = await make_users(session, n=6)
+    _, first, _, p1, _ = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+    await login(client, p1.username)
+    r = await client.post(
+        f"/potential-drivers/{first.id}/drove?card=1",
+        headers={"HX-Request": "true"},
+        follow_redirects=True,
+    )
+    # htmx follows to the dashboard and takes the card and the previews from it.
+    assert r.status_code == 200 and 'id="card-kitchen"' in r.text
+    assert 'id="kitchen-preview"' in r.text and "The plan depends on" not in r.text
+
+
+async def test_preview_with_one_driver_left_has_no_switch(session):
+    people = await make_users(session)
+    _, first, _, _, p2 = await kitchen_pair(session, people)
+    admin = people[0]
+    await duties.excuse(session, first, admin, at(MONDAY, 10))
+    preview = await duties.preview(
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=7)
+    )
+    assert list(preview.plans) == [p2.id]
+
+
+async def test_dashboard_without_preview_days(session, client, monkeypatch):
+    people = await make_users(session, n=4)
+    await kitchen_pair(session, people, settings.today())
+    await session.commit()
+    monkeypatch.setattr(settings, "preview_days", 0)
+    assert (await client.get("/")).status_code == 200
 
 
 async def test_stats_colour_strikes(session, client):

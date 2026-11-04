@@ -1,6 +1,7 @@
 {# One duty card on the dashboard. Expects: trip (or None), duty, deadline,
    can_mark_as_driver(potential driver).
-   Also returned alone by the "Done" button, which swaps the card via htmx. #}
+   The "Done" button posts via htmx and gets the dashboard back; it takes this card and the
+   previews from it. #}
 <section class="card duty" id="card-{{ duty.value }}">
   <h2>
     {{ duty.label }}
@@ -17,7 +18,8 @@
         <div class="name">{{ person(pd.user) }}</div>
         {% if can_mark_as_driver(pd) %}
           <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
-                  hx-target="#card-{{ duty.value }}" hx-swap="outerHTML">Done</button>
+                  hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
+                  hx-select-oob="#kitchen-preview,#trash-preview" hx-swap="outerHTML">Done</button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}

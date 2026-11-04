@@ -3,22 +3,23 @@
 <h1>Statistics {{ help_link("points") }}</h1>
 <div class="table-wrap"><table>
   <tr>
-    <th>Name</th>
-    <th class="num">Kitchen done</th><th class="num">Kitchen missed</th><th class="num">Kitchen points</th>
-    <th class="num">Trash done</th><th class="num">Trash points</th><th class="num">Penalty trash duties</th><th>Strikes</th>
+    {# What people look for first comes first, so it's visible on a phone without scrolling. #}
+    <th>Name</th><th class="num">Kitchen points</th><th class="num">Trash points</th><th>Strikes</th>
+    <th class="num">Kitchen done</th><th class="num">Kitchen missed</th>
+    <th class="num">Trash done</th><th class="num">Penalty trash duties</th>
   </tr>
   {% for u in users %}
     <tr{% if not u.active %} class="muted"{% endif %}>
       <td>{{ person(u) }}{% if not u.active %} (inactive){% endif %}</td>
-      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
       <td class="points">{{ points[Duty.kitchen][u.id]|signed }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
       <td class="points">{{ points[Duty.trash][u.id]|signed }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
       {# Green without strikes, red one strike before the penalty week, orange in between. #}
       {% set n = active[u.id] %}
       <td class="strikes {{ 'ok' if n == 0 else ('bad' if n >= strike_threshold - 1 else 'warn') }}">{{ n }} / {{ strike_threshold }}</td>
+      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
+      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
+      <td class="num">{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
+      <td class="num">{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
     </tr>
   {% endfor %}
 </table></div>

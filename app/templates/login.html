@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Log in</h1>
-<form method="post" action="/login" class="card row" style="max-width:420px">
+<form method="post" action="/login" class="card row stack">
   <input type="hidden" name="next" value="{{ next }}">
   <label>Username <input name="username" autocomplete="username" required autofocus></label>
   <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
