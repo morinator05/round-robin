@@ -94,7 +94,7 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
-        """Plain-text form, e.g. "Anna (A401)", for messages and confirm dialogs.
+        """Plain-text form, e.g. "Ben (A401)", for messages and confirm dialogs.
 
         In page content `person()` in `web.py` is used instead (name and room styled).
         """
