@@ -11,8 +11,9 @@ import pytest
 
 from app.services.carpool import (
     POINTS_PER_DUTY,
+    Balance,
     Member,
-    Role,
+    assume_driven,
     charge_riders,
     credit_driver,
     display_points,
@@ -171,32 +172,61 @@ def test_fewer_people_than_needed():
     assert result == [[1], [1], [1]]
 
 
-def test_undriven_trip_potential_drivers_become_roles():
-    members = people(15)
-    balances, _, _ = run(members, 30)
-    today = START + timedelta(days=30)
-    [pair] = plan(balances, members, [(today, today)], 2)
-    charge_riders(balances, [c.id for c in members])
+def first_day(result: list[list[int]], uid: int, start: date) -> date | None:
+    """The first trip (as a date) in a plan of one-day trips from `start` that `uid` is on."""
+    return next((start + timedelta(days=i) for i, c in enumerate(result) if uid in c), None)
 
-    result = plan(balances, members, days(30, today + timedelta(days=1)), 2, [(today, pair)])
-    shown = [u for chosen in result for u in chosen]
-    assert not set(pair) & set(shown)
-    potential_drivers = tuple(sorted(pair))
-    skipped, drove = Role(today, False, potential_drivers), Role(today, True, potential_drivers)
-    # Without the drive you're up again much sooner than with it.
-    assert skipped in shown and drove in shown
-    assert shown.index(skipped) < shown.index(drove)
-    assert shown.count(skipped) == shown.count(drove) == 1
+
+def test_assume_driven():
+    balances = {1: Balance(pending_share=Fraction(1, 2)), 2: Balance(pending_share=Fraction(1, 2))}
+    released = {1: Fraction(1, 2), 2: Fraction(1, 2)}
+    after = assume_driven(balances, [1, 2, 3, 4], released, 1, START)
+    assert after[1].score == 1 - Fraction(1, 4) and after[1].last_drove == START
+    assert after[2].score == after[3].score == -Fraction(1, 4)
+    assert after[1].pending_share == after[2].pending_share == 0
+    # The input is not changed.
+    assert balances[1] == Balance(pending_share=Fraction(1, 2))
 
 
 def test_fresh_start_non_driver_is_next():
     members = people(15)
-    balances = {}
-    charge_riders(balances, [c.id for c in members])
-    result = plan(balances, members, days(14, START + timedelta(days=1)), 2, [(START, [1, 2])])
-    assert Role(START, False, (1, 2)) in result[0]
-    # The driver has the highest score, so they're not up again within two weeks.
-    assert all(Role(START, True, (1, 2)) not in chosen for chosen in result)
+    upcoming = days(14, START + timedelta(days=1))
+    released = {1: Fraction(1, 2), 2: Fraction(1, 2)}
+    balances = {1: Balance(pending_share=Fraction(1, 2)), 2: Balance(pending_share=Fraction(1, 2))}
+    for driver, other in [(1, 2), (2, 1)]:
+        after = assume_driven(balances, range(1, 16), released, driver, START)
+        result = plan(after, members, upcoming, 2)
+        assert other in result[0]
+        # The driver has the highest score, so they're not up again within two weeks.
+        assert all(driver not in chosen for chosen in result)
+
+
+def test_open_pair_with_different_scores_gets_exact_plans():
+    """Each outcome is simulated with the real balances, not an average of the pair's."""
+    members = people(15)
+    balances, _, _ = run(members, 40)
+    today = START + timedelta(days=40)
+    # A pair far apart: the lowest and a higher score.
+    by_score = sorted(balances, key=lambda uid: balances[uid].score)
+    low, high = by_score[0], by_score[7]
+    # Both are potential drivers of today's open trip and reserve half of it.
+    released = {low: Fraction(1, 2), high: Fraction(1, 2)}
+    for uid, share in released.items():
+        balances[uid].pending_share += share
+    upcoming = days(30, today + timedelta(days=1))
+    riders = [m.id for m in members]
+    plans = {
+        driver: plan(assume_driven(balances, riders, released, driver, today), members, upcoming, 2)
+        for driver in (low, high)
+    }
+    assert plans[low] != plans[high]
+    start = today + timedelta(days=1)
+    for driver, other in [(low, high), (high, low)]:
+        assert first_day(plans[driver], other, start) < (
+            first_day(plans[driver], driver, start) or date.max
+        )
+    # Whoever skips is up sooner the lower their score is.
+    assert first_day(plans[high], low, start) <= first_day(plans[low], high, start)
 
 
 def test_being_chosen_without_driving_does_not_move_you_back():
@@ -210,8 +240,3 @@ def test_being_chosen_without_driving_does_not_move_you_back():
     # 2 and 4 have the same score; 2 wasn't pushed back by being a potential driver first.
     [chosen] = plan(balances, members, days(1, START + timedelta(days=2)), 1)
     assert chosen == [2]
-
-
-def test_undriven_trip_with_one_potential_driver_is_kept():
-    result = plan({}, people(3), days(2), 1, [(START, [1])])
-    assert all(isinstance(u, int) for chosen in result for u in chosen)

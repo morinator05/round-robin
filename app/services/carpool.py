@@ -31,8 +31,9 @@ Display: scores are exact fractions, but the statistics page shows them as whole
 `POINTS_PER_DUTY` per duty, rounded by the largest-remainder method so the shown points
 still sum to exactly what the scores sum to (see `display_points`).
 
-The preview can't know which potential driver of an undriven trip will drive it, so it
-replaces them by `Role`s: the one who drives (with the drive) and the ones who don't.
+The preview can't know which potential driver of the open trip (today's, nobody drove it
+yet) will drive it, so it simulates one plan per potential driver, each as if that one
+drove (see `assume_driven`).
 
 Everything in here is pure (no database) so it can be tested and simulated cheaply.
 """
@@ -94,20 +95,6 @@ class Member:
         That is, no away period overlaps those days.
         """
         return not any(a_start <= end and start <= a_end for a_start, a_end in self.away)
-
-
-@dataclass(frozen=True)
-class Role:
-    """Preview stand-in for the potential drivers of a trip nobody has driven yet.
-
-    Shows where each outcome (drove / didn't drive) puts them, instead of guessing a name.
-    """
-
-    # First day of the undriven trip.
-    start: date
-    drove: bool
-    # The trip's real potential drivers (any of them can end up in this role).
-    potential_drivers: tuple[int, ...] = ()
 
 
 def week_start(d: date) -> date:
@@ -184,44 +171,25 @@ def display_points(scores: dict[int, Fraction], queue: Sequence[int] = ()) -> di
     return points
 
 
-def _replace_by_roles(
+def assume_driven(
     balances: dict[int, Balance],
-    members: list[Member],
-    start: date,
-    potential_driver_ids: Iterable[int],
-    roles: dict[int, Role],
-) -> list[Member]:
-    """Swap an undriven trip's potential drivers for one driver and the others as non-drivers.
+    riders: Iterable[int | None],
+    released: dict[int, Fraction],
+    driver: int,
+    on: date,
+) -> dict[int, Balance]:
+    """A copy of `balances` as if `driver` drove the open trip starting `on`.
 
-    Each role gets the potential drivers' average balance as it will be after the trip:
-    the driver with the drive (and the trip as last drove), the others unchanged, nothing
-    pending. A role is away whenever any of them is, since it could be any of them. Roles
-    get negative ids, added to `roles`. Changes `balances` in place and returns the new
-    members.
+    The trip's `riders` are charged their share, the shares its potential drivers had
+    reserved while it was open (`released`, by user id) are taken back, and `driver` gets
+    the drive. `balances` itself is not changed.
     """
-    ids = set(potential_driver_ids)
-    drivers = [m for m in members if m.id in ids]
-    if len(drivers) < 2:
-        return members
-    before = [balances.pop(m.id, Balance()) for m in drivers]
-    fair_share = sum((b.fair_share for b in before), Fraction(0)) / len(before)
-    drives = sum((b.drives for b in before), Fraction(0)) / len(before)
-    last_drove = max((b.last_drove for b in before if b.last_drove), default=None)
-    room = min((m.room for m in drivers), key=room_key)
-    away = tuple(period for m in drivers for period in m.away)
-    driver_tuple = tuple(sorted(m.id for m in drivers))
-
-    result = [m for m in members if m.id not in ids]
-    for drove in [True] + [False] * (len(drivers) - 1):
-        rid = -(len(roles) + 1)
-        roles[rid] = Role(start, drove, driver_tuple)
-        balances[rid] = Balance(
-            fair_share=fair_share,
-            drives=drives + (1 if drove else 0),
-            last_drove=start if drove else last_drove,
-        )
-        result.append(Member(rid, room, away))
-    return result
+    balances = copy.deepcopy(balances)
+    charge_riders(balances, riders)
+    for uid, share in released.items():
+        reserve_share(balances, uid, -share)
+    credit_driver(balances, driver, on)
+    return balances
 
 
 def plan(
@@ -229,25 +197,16 @@ def plan(
     members: list[Member],
     trips: list[tuple[date, date]],
     n: int,
-    undriven_trips: Iterable[tuple[date, list[int]]] = (),
-) -> list[list[int | Role]]:
+) -> list[list[int]]:
     """Simulate who will be chosen as potential drivers for upcoming trips, for the preview.
 
     Nobody knows yet who will drive each trip, so every potential driver reserves an equal
     part of it. `balances` is copied, not changed.
 
-    `undriven_trips` are the real trips nobody has driven yet, as (first day, potential
-    drivers). They are replaced by `Role`s, so the preview shows when they're up again if
-    they drive and if they don't. A role is shown only once: after that it's a person whose
-    next outcome is unknown again, so it leaves the simulation.
-
     Returns:
-        One list of potential drivers (user ids or `Role`s) per entry in `trips`, in order.
+        One list of potential drivers (user ids) per entry in `trips`, in order.
     """
     balances = copy.deepcopy(balances)
-    roles: dict[int, Role] = {}
-    for start, driver_ids in undriven_trips:
-        members = _replace_by_roles(balances, members, start, driver_ids, roles)
     rooms = {m.id: m.room for m in members}
     result = []
     for start, end in trips:
@@ -256,6 +215,5 @@ def plan(
         chosen = choose_potential_drivers(balances, riders, n, rooms)
         for uid in chosen:
             reserve_share(balances, uid, Fraction(1, len(chosen)))
-        result.append([roles.get(uid, uid) for uid in chosen])
-        members = [m for m in members if m.id not in roles or m.id not in chosen]
+        result.append(chosen)
     return result

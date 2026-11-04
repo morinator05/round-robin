@@ -5,7 +5,6 @@ Routes only parse input, call a service and render or redirect; the rules live i
 doesn't submit the form again.
 """
 
-from dataclasses import replace
 from datetime import date, timedelta
 from fractions import Fraction
 from pathlib import Path
@@ -25,7 +24,6 @@ from app.deps import AdminUser, CurrentUser, OptionalUser, Session
 from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, carpool, duties, jobs, strikes, users
-from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
 from app.services.users import UserError
@@ -56,22 +54,6 @@ def person(context, user: User | None) -> Markup:
     return person_html(user, is_me)
 
 
-@pass_context
-def role(context, r: Role) -> Markup:
-    """A preview stand-in: "Done" (whoever drives) or "Skipped" (whoever doesn't).
-
-    For an earlier trip nobody has driven yet (yesterday's before the deadline), its date
-    follows. Green with a tick if driven, amber with a cross if not.
-    """
-    text = "Done" if r.drove else "Skipped"
-    if r.start != context.get("today"):
-        text += f" {short_date(r.start)}"
-    css = "role role-done" if r.drove else "role role-skip"
-    return Markup('<span class="{}"><span aria-hidden="true">{}</span> {}</span>').format(
-        css, "✓" if r.drove else "✗", text
-    )
-
-
 def help_link(topic: str) -> Markup:
     """A small "?" after a heading, linking to that topic on the help page."""
     return Markup(
@@ -82,8 +64,6 @@ def help_link(topic: str) -> Markup:
 
 templates.env.globals["person"] = person
 templates.env.globals["help_link"] = help_link
-templates.env.globals["role"] = role
-templates.env.tests["role"] = lambda x: isinstance(x, Role)
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
@@ -198,8 +178,15 @@ async def logout(request: Request):
 
 
 @router.get("/")
-async def dashboard(request: Request, session: Session, user: OptionalUser):
-    """Today's duties and the preview; visible without login."""
+async def dashboard(
+    request: Request, session: Session, user: OptionalUser, cleaner: int | None = None
+):
+    """Today's duties and the preview; visible without login.
+
+    While nobody has driven today's kitchen trip, the preview has one plan per potential
+    driver; `cleaner` picks which one is shown (default: yourself if you're one of them,
+    else the first).
+    """
     today = settings.today()
     kitchen = await duties.get_trip(session, Duty.kitchen, today)
     trash = await duties.get_trip(session, Duty.trash, today)
@@ -211,23 +198,30 @@ async def dashboard(request: Request, session: Session, user: OptionalUser):
     tomorrow = today + timedelta(days=1)
     horizon = today + timedelta(days=settings.preview_days)
     kitchen_preview = await duties.preview(session, Duty.kitchen, tomorrow, horizon)
-    shown = [u for e in kitchen_preview for u in e.potential_drivers if isinstance(u, Role)]
-    # Whoever drives today's trip is usually up only after the plan ends; say so below it.
-    later = [
-        r
-        for r in dict.fromkeys(replace(u, drove=True) for u in shown if not u.drove)
-        if r not in shown
-    ]
+    trash_preview = await duties.preview(session, Duty.trash, tomorrow, horizon)
+    people = await users_by_id(session)
+
+    choices = [uid for uid in kitchen_preview.plans if uid is not None]
+    if cleaner not in kitchen_preview.plans:
+        cleaner = user.id if user and user.id in choices else next(iter(kitchen_preview.plans))
+    kitchen_plan = kitchen_preview.plans[cleaner]
+    # The open trip's potential drivers who aren't up again within the plan (usually
+    # whoever cleans): said below it, so nobody wonders where they went.
+    shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
+    later = [people[uid] for uid in choices if uid not in shown and uid in people]
     return render(
         request,
         "dashboard.html",
         user,
         kitchen=duty_card_ctx(kitchen, Duty.kitchen, user),
         trash=duty_card_ctx(trash, Duty.trash, user),
-        kitchen_preview=kitchen_preview,
+        kitchen_plan=kitchen_plan,
+        kitchen_choices=[people[uid] for uid in choices if uid in people],
+        kitchen_cleaner=cleaner,
+        kitchen_open_start=kitchen_preview.open_start,
         kitchen_later=later,
-        trash_preview=await duties.preview(session, Duty.trash, tomorrow, horizon),
-        users_by_id=await users_by_id(session),
+        trash_plan=next(iter(trash_preview.plans.values())),
+        users_by_id=people,
     )
 
 

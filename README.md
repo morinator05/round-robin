@@ -60,7 +60,7 @@ deleted) are replaced on their open duties immediately.
 
 | Page | Access | Content |
 |---|---|---|
-| Overview | public | Today's duties, plan for the next 14 days. Today's kitchen pair is shown as "Done" / "Skipped": where they land if they clean or don't |
+| Overview | public | Today's duties, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
 | Statistics | public | Per resident: done, missed, points (score × 100), strikes |
 | History | login | Duty history, 4 weeks per page |
 | My profile | login | Absences, strikes, recent duties, password |

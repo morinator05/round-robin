@@ -47,17 +47,18 @@ of undriven trips they're already a potential driver on), ties broken by `last_d
 room. All values are `Fraction`s.
 `app/services/duties.load_balances` rebuilds every balance from the full trip history on
 each call, and only driven trips count (`duties.was_driven`), so scores sum to 0. The one
-deliberate exception: a moved-out resident's score leaves with them. `duties.preview`
-charges the riders of still undriven trips itself, since its Roles assume the trip gets
-driven.
+deliberate exception: a moved-out resident's score leaves with them.
 
 **Trips.** A `Trip` has `Rider` rows (who was available, so shares stay correct later) and
 `PotentialDriver` rows (who was chosen, with a `Status`: `pending`, `drove`, `rode` when
 someone else drove, `missed`, `excused`). Only the current day's kitchen trip and week's
 trash trip are created in the DB (`duties.materialize`). Future trips exist only as a
 simulation in `duties.preview` → `carpool.plan`, so they always reflect current balances
-and absences. In the preview, the potential drivers of a still undriven trip are replaced
-by `Role` stand-ins (`drove=True` / `False`) instead of guessing who drives.
+and absences. While nobody has driven the latest trip (the **open trip**, normally today's),
+`duties.preview` returns one plan per pending potential driver (`Preview.plans`), each
+simulated as if that one drove it (`carpool.assume_driven`: riders charged, reserved
+shares released, drive credited). The dashboard shows one of them, chosen with `?cleaner=`.
+Older undriven trips keep their reserved shares, as when real trips are chosen.
 
 **Penalty weeks.** `strikes.issue` calls `check_threshold`; at `STRIKE_THRESHOLD` active
 strikes it creates a trash `Trip` with `is_penalty=True` in the next free week and marks

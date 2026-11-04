@@ -13,7 +13,6 @@ from app.config import settings
 from app.main import app
 from app.models import Duty, PotentialDriver, Status, Trip
 from app.services import duties, jobs, strikes, users
-from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import LoginThrottle
 from app.services.users import UserError
@@ -217,28 +216,29 @@ async def test_disputed_trip_stops_counting(session):
     assert all(b.score == 0 for b in balances.values())
 
 
-async def test_preview_shows_open_pair_as_roles(session):
+async def test_preview_has_one_plan_per_open_potential_driver(session):
     people = await make_users(session)
     _, first, _, p1, p2 = await kitchen_pair(session, people)
 
-    async def shown():
+    async def plans():
         preview = await duties.preview(
             session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=30)
         )
-        return [u for e in preview for u in e.potential_drivers]
+        return preview.plans
 
-    pair = tuple(sorted([p1.id, p2.id]))
-    before = await shown()
+    before = await plans()
+    assert set(before) == {p1.id, p2.id}
     # Whoever doesn't clean is up again tomorrow; whoever does, much later.
-    assert before[:2].count(Role(MONDAY, False, pair)) == 1
-    assert Role(MONDAY, True, pair) in before
-    assert p1.id not in before and p2.id not in before
+    for driver, other in [(p1, p2), (p2, p1)]:
+        plan = before[driver.id]
+        assert other.id in plan[0].potential_drivers
+        assert all(driver.id not in e.potential_drivers for e in plan[:7])
 
-    # Once it's done, the outcome is known and the names are back.
+    # Once it's done, the outcome is known: a single plan.
     await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
-    after = await shown()
-    assert not any(isinstance(u, Role) for u in after)
-    assert p2.id in after
+    after = await plans()
+    assert list(after) == [None]
+    assert after[None] == before[p1.id]
 
 
 async def test_partner_who_did_not_drive_is_chosen_next(session):
@@ -301,7 +301,9 @@ async def test_away_replaces_pending_potential_driver(session):
     preview = await duties.preview(
         session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=3)
     )
-    assert all(leaving_id not in e.potential_drivers for e in preview)
+    assert all(
+        leaving_id not in e.potential_drivers for plan in preview.plans.values() for e in plan
+    )
 
 
 async def test_delete_user_keeps_history_and_replaces(session):
@@ -586,6 +588,25 @@ async def test_stats_shows_whole_points(session, client):
     kitchen = [int(c.replace("\u2212", "-")) for c in cells[::2]]
     assert sorted(kitchen) == [-34, -33, 67]
     assert all(c == "0" for c in cells[1::2])
+
+
+async def test_dashboard_switches_between_plans(session, client):
+    people = await make_users(session, n=6)
+    _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await session.commit()
+
+    def current(text):
+        return re.findall(r'cleaner=(\d+)"[^>]*\n?[^>]*aria-current="true"', text)
+
+    text = (await client.get("/")).text
+    assert "Depends on who cleans today" in text
+    assert current(text) == [str(p1.id)]
+    text = (await client.get(f"/?cleaner={p2.id}")).text
+    assert current(text) == [str(p2.id)]
+    # Unknown ids fall back to the default; logged in as one of the pair, that's yourself.
+    await login(client, p2.username)
+    assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
+    assert "If you clean" in (await client.get("/")).text
 
 
 async def test_stats_colour_strikes(session, client):
