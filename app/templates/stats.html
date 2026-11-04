@@ -8,15 +8,13 @@
     <th>Müll erledigt</th><th>Müll Punkte</th><th>Straf-Mülldienste</th><th>Strikes</th>
   </tr>
   {% for u in users %}
-    {% set kb = balances[Duty.kitchen].get(u.id) %}
-    {% set tb = balances[Duty.trash].get(u.id) %}
     <tr{% if not u.active %} class="muted"{% endif %}>
       <td>{{ person(u) }}{% if not u.active %} (inaktiv){% endif %}</td>
       <td>{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
       <td>{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
-      <td>{{ "%.2f"|format(kb.score|float) if kb else "0.00" }}</td>
+      <td class="points">{{ points[Duty.kitchen][u.id]|signed }}</td>
       <td>{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
-      <td>{{ "%.2f"|format(tb.score|float) if tb else "0.00" }}</td>
+      <td class="points">{{ points[Duty.trash][u.id]|signed }}</td>
       <td>{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
       {# Green without strikes, red one strike before the penalty week, orange in between. #}
       {% set n = active[u.id] %}

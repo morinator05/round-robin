@@ -22,6 +22,8 @@ cleaned − shares. The lowest score goes next; ties go to whoever cleaned longe
 cleaned = first). Being put on a duty without cleaning doesn't move you back.
 Example with 15 residents: a trip takes 1/15 ≈ 0.07 from everyone, the person who cleans
 ends at 1 − 0.07 ≈ +0.93. All scores sum to 0, except for those of residents who moved out.
+The statistics page shows scores as whole points, 100 per duty (+93 and −7 in the example),
+rounded so that they still sum to 0.
 - Away or paused: not riding, so no share for that time.
 - New residents start at 0.
 - Only the person who cleaned gets the point.

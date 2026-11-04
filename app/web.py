@@ -7,6 +7,7 @@ doesn't submit the form again.
 
 from dataclasses import replace
 from datetime import date, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
 
@@ -22,7 +23,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
-from app.services import auth, duties, jobs, strikes, users
+from app.services import auth, carpool, duties, jobs, strikes, users
 from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
@@ -96,6 +97,8 @@ templates.env.filters["short_date"] = lambda d: f"{d:%d.%m.}" if d else ""
 templates.env.filters["date_time"] = lambda d: (
     f"{d.astimezone(settings.tz):%d.%m.%Y %H:%M}" if d else ""
 )
+# Points with their sign: "+37", "-112", "0".
+templates.env.filters["signed"] = lambda n: f"{n:+d}" if n else "0"
 templates.env.filters["weekday"] = lambda d: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][d.weekday()]
 
 
@@ -390,12 +393,20 @@ async def stats(request: Request, session: Session, user: OptionalUser):
         key = (uid, duty, "penalty" if is_penalty else status)
         counts[key] = counts.get(key, 0) + 1
     active = {u.id: len(await strikes.active_strikes(session, u.id)) for u in all_users}
+    # Whole points per duty instead of fractions; ties go by who is chosen next.
+    ids = [u.id for u in all_users]
+    rooms = {u.id: u.room_number for u in all_users}
+    points = {}
+    for d, b in balances.items():
+        queue = carpool.choose_potential_drivers(b, ids, len(ids), rooms)
+        scores = {uid: b[uid].score if uid in b else Fraction(0) for uid in ids}
+        points[d] = carpool.display_points(scores, queue)
     return render(
         request,
         "stats.html",
         user,
         users=all_users,
-        balances=balances,
+        points=points,
         counts=counts,
         active=active,
     )

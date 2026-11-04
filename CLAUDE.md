@@ -39,9 +39,11 @@ a **trip** is one kitchen day / one trash week, its **riders** are the members a
 for it (active, not away), and each rider is charged a fair share of `1/len(riders)`
 (`charge_riders`). Each trip gets `n` **potential drivers** (kitchen 2, trash 1); whoever
 marks it done is the **driver** and gets one drive (`credit_driver`). Score = drives −
-fair share (the paper's score; shown as "Punkte"). `choose_potential_drivers` takes the
-lowest `effective_score` (score plus `pending_share` of undriven trips they're already a
-potential driver on), ties broken by `last_drove`, then room. All values are `Fraction`s.
+fair share (the paper's score). The stats page shows it as whole "Punkte", 100 per duty,
+via `carpool.display_points` (largest-remainder rounding, so they still sum to 0).
+`choose_potential_drivers` takes the lowest `effective_score` (score plus `pending_share`
+of undriven trips they're already a potential driver on), ties broken by `last_drove`, then
+room. All values are `Fraction`s.
 `app/services/duties.load_balances` rebuilds every balance from the full trip history on
 each call, and only driven trips count (`duties.was_driven`), so scores sum to 0. The one
 deliberate exception: a moved-out resident's score leaves with them. `duties.preview`

@@ -1,6 +1,7 @@
 """Rules against a real database: assigning, deadlines, strikes, moving out, web pages."""
 
 import random
+import re
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
 
@@ -571,6 +572,19 @@ async def test_own_name_is_highlighted(session, client):
     text = (await client.get("/stats")).text
     assert str(person_html(people[1], is_me=True)) in text
     assert str(person_html(people[0])) in text
+
+
+async def test_stats_shows_whole_points(session, client):
+    """Scores 2/3, -1/3, -1/3 are shown as whole points that still sum to 0."""
+    people = await make_users(session, n=3)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await session.commit()
+    text = (await client.get("/stats")).text
+    cells = re.findall(r'<td class="points">([^<]*)</td>', text)
+    kitchen = [int(c) for c in cells[::2]]
+    assert sorted(kitchen) == [-34, -33, 67]
+    assert all(c == "0" for c in cells[1::2])
 
 
 async def test_stats_colour_strikes(session, client):
