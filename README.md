@@ -3,6 +3,22 @@
 Web app for the cleaning duties on dorm floor A4: assigns kitchen and trash duty fairly,
 tracks who did it and gives strikes for missed duties. The UI is in English.
 
+## Screenshots
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-light.png" width="820" alt="Overview: today's kitchen and trash duty and the plan for the next 14 days"></picture>
+
+| Statistics | History |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/statistics-dark.png"><img src="docs/screenshots/statistics-light.png" width="400" alt="Statistics"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history-light.png" width="400" alt="History"></picture> |
+| **My profile** | **Admin** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/profile-dark.png"><img src="docs/screenshots/profile-light.png" width="400" alt="My profile"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/admin-dark.png"><img src="docs/screenshots/admin-light.png" width="400" alt="Admin"></picture> |
+
+<details><summary>On a phone</summary>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-mobile-dark.png"><img src="docs/screenshots/overview-mobile-light.png" width="300" alt="Overview on a phone"></picture>
+
+</details>
+
 ## Rules
 
 **Duties**
@@ -137,4 +153,4 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 - `app/services/`: the other rules (duties, strikes, users, login, daily job)
 - `app/web.py`: pages and form actions; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
-- `scripts/`: create the first floor speaker, add test residents
+- `scripts/`: create the first floor speaker, add test residents, take the screenshots above
