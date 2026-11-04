@@ -36,7 +36,7 @@ from app.services import duties, jobs, users  # noqa: E402
 
 # fmt: off
 FIRST_NAMES = [
-    "Anna", "Ben", "Clara", "David", "Emma", "Felix", "Greta", "Hannes", "Ida", "Jonas",
+    "Ben", "Clara", "David", "Emma", "Felix", "Greta", "Hannes", "Ida", "Jonas",
     "Kim", "Lukas", "Mia", "Noah", "Olivia", "Paul", "Quinn", "Rosa", "Simon", "Tara",
     "Uwe", "Vera", "Wim", "Xenia", "Yusuf", "Zoe",
 ]
