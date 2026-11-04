@@ -7,13 +7,13 @@
 Usernames are the lowercase first names; existing usernames are skipped, so it is
 safe to run more than once. Current trips that nobody has driven yet get their
 potential drivers chosen again, so everyone rides along (on startup the app may have
-created them while only the Flursprecher existed). Afterwards today's duties are assigned.
+created them while only the floor speaker existed). Afterwards today's duties are assigned.
 
 `--days N` needs a database without history (`docker compose down -v`). It plays the
-last N days through the app's own rules: the daily job at 00:05 and 12:05, each duty
-done the same evening, the next morning, or missed (giving strikes and penalty weeks),
-depending on how reliable each resident is, and a few absences. Today's kitchen duty
-is left open. `--random-seed` gives the same history again.
+last N days through the app's own rules: the daily job at DEADLINE_HOUR:05, each duty
+done the same evening, the next morning before the deadline, or missed (giving strikes
+and penalty weeks), depending on how reliable each resident is, and a few absences.
+Today's kitchen duty is left open. `--random-seed` gives the same history again.
 """
 
 import argparse
@@ -141,10 +141,11 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     late: dict[date, list[int]] = {}
     day = start
     while day <= today:
+        hour = settings.deadline_hour
         steps = [
-            (at(day, 0, 5), "tick"),
-            (at(day, 9), "late"),
-            (at(day, 12, 5), "tick"),
+            # Late ones mark the next morning, an hour before the deadline.
+            (at(day, max(hour - 1, 0)), "late"),
+            (at(day, hour, 5), "tick"),
             (at(day, 18), "trash"),
             (at(day, 20), "kitchen"),
         ]

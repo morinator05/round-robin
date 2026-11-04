@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     secret_key: str = ""
     timezone: str = "Europe/Berlin"
     # A duty must be marked done by this hour, `deadline_days_after` days after it ended.
-    deadline_hour: int = 12
+    # Each day's (on Monday also the week's) potential drivers are chosen at this hour too,
+    # right after the previous duty's deadline, so only one duty is ever open at a time.
+    deadline_hour: int = 8
     deadline_days_after: int = 1
     # Potential drivers chosen for each trip (day / week); only one of them has to drive.
     kitchen_people_per_day: int = 2

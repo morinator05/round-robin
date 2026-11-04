@@ -71,9 +71,12 @@ still count for the share size but their share is dropped, not passed on to othe
 
 **The daily job.** `jobs.daily_tick` takes a Postgres advisory lock, marks overdue
 potential drivers missed and issues strikes (`duties.process_overdue`), then materializes
-today's trips, and commits. It runs on startup, at 00:05 and `DEADLINE_HOUR`:05
-(scheduler in `app/main.py`), from the admin page, and from the dashboard when today's
-trips are missing, so it must stay idempotent. Absences, pausing and deleting users call
+today's trips, and commits. A day's (on Monday the week's) trip is only materialized from
+`duties.choose_at` on: the deadline hour of its first day, right after the previous trip's
+deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
+Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
+startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
+the dashboard when the current trips are missing, so it must stay idempotent. Absences, pausing and deleting users call
 `duties.reconcile`, which removes them as riders and pending potential drivers of
 current/upcoming trips and chooses replacements.
 

@@ -35,10 +35,10 @@ async def lifespan(app: FastAPI):
     scheduler = None
     if settings.run_scheduler:
         scheduler = AsyncIOScheduler(timezone=settings.tz)
-        # Shortly after midnight (new day/week) and right after the deadline hour.
-        for hour in sorted({0, settings.deadline_hour}):
-            trigger = CronTrigger(hour=hour, minute=5, timezone=settings.tz)
-            scheduler.add_job(scheduled_tick, trigger)
+        # Right after the deadline hour: marks what was missed, then chooses the new day's
+        # (and on Monday the new week's) potential drivers.
+        trigger = CronTrigger(hour=settings.deadline_hour, minute=5, timezone=settings.tz)
+        scheduler.add_job(scheduled_tick, trigger)
         scheduler.start()
         await scheduled_tick()
     yield

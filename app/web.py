@@ -124,6 +124,14 @@ def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
     return {
         "trip": trip,
         "duty": duty,
+        # Before the deadline hour the kitchen card still shows yesterday's duty.
+        "day": (
+            "today"
+            if trip is None or trip.start_date == now.date()
+            else "yesterday"
+            if trip.start_date == now.date() - timedelta(days=1)
+            else None
+        ),
         "deadline": duties.deadline(trip) if trip else None,
         "can_mark_as_driver": (
             lambda pd: user is not None and duties.can_mark_as_driver(pd, user, now)
@@ -187,18 +195,23 @@ async def dashboard(
     driver; `cleaner` picks which one is shown (default: yourself if you're one of them,
     else the first).
     """
-    today = settings.today()
-    kitchen = await duties.get_trip(session, Duty.kitchen, today)
-    trash = await duties.get_trip(session, Duty.trash, today)
+    now = settings.now()
+    today = now.date()
+    # Before the deadline hour that's still yesterday's (last week's) duty.
+    kitchen = await duties.current_trip(session, Duty.kitchen, now)
+    trash = await duties.current_trip(session, Duty.trash, now)
     if kitchen is None or trash is None:
-        await jobs.daily_tick(session, settings.now())
-        kitchen = await duties.get_trip(session, Duty.kitchen, today)
-        trash = await duties.get_trip(session, Duty.trash, today)
+        await jobs.daily_tick(session, now)
+        kitchen = await duties.current_trip(session, Duty.kitchen, now)
+        trash = await duties.current_trip(session, Duty.trash, now)
 
-    tomorrow = today + timedelta(days=1)
+    def after(trip: Trip | None) -> date:
+        """The preview starts with the first trip after the one on the card."""
+        return trip.end_date + timedelta(days=1) if trip else today
+
     horizon = today + timedelta(days=settings.preview_days)
-    kitchen_preview = await duties.preview(session, Duty.kitchen, tomorrow, horizon)
-    trash_preview = await duties.preview(session, Duty.trash, tomorrow, horizon)
+    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon)
+    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon)
     people = await users_by_id(session)
 
     choices = [uid for uid in kitchen_preview.plans if uid is not None]
@@ -221,6 +234,7 @@ async def dashboard(
         kitchen_choices=[people[uid] for uid in choices if uid in people],
         kitchen_cleaner=chosen,
         kitchen_open_start=kitchen_preview.open_start,
+        yesterday=today - timedelta(days=1),
         kitchen_later=later,
         trash_plan=next(iter(trash_preview.plans.values())),
         users_by_id=people,

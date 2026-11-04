@@ -6,7 +6,7 @@
   <h2>
     {{ duty.label }}
     <span class="muted">
-      {% if duty == Duty.kitchen %}today{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
+      {% if duty == Duty.kitchen %}{{ day or (trip.start_date|weekday ~ " " ~ trip.start_date|short_date) }}{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
     </span>
   </h2>
   {% if trip and trip.is_penalty %}<p class="penalty">Penalty trash duty ({{ strike_threshold }} strikes)</p>{% endif %}

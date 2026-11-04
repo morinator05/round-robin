@@ -44,6 +44,30 @@ def deadline(trip: Trip) -> datetime:
     return datetime.combine(day, time(settings.deadline_hour), settings.tz)
 
 
+def choose_at(duty: Duty, day: date) -> datetime:
+    """When the potential drivers of the trip containing `day` are chosen.
+
+    At the deadline hour of the trip's first day: right after the previous trip's deadline
+    (with the default DEADLINE_DAYS_AFTER=1), so that trip is done or missed by then. That
+    way only one trip is ever open, and the preview can be exact for each outcome of it.
+    """
+    start, _ = trip_bounds(duty, day)
+    return datetime.combine(start, time(settings.deadline_hour), settings.tz)
+
+
+async def current_trip(session: AsyncSession, duty: Duty, now: datetime) -> Trip | None:
+    """The trip of `duty` that is on at `now`, shown on the dashboard.
+
+    Today's (this week's) trip once it's chosen (`choose_at`); before that the previous
+    one, which can still be marked until its deadline. None if it doesn't exist.
+    """
+    today = now.date()
+    if now >= choose_at(duty, today):
+        return await get_trip(session, duty, today)
+    start, _ = trip_bounds(duty, today)
+    return await get_trip(session, duty, start - timedelta(days=1))
+
+
 async def load_members(session: AsyncSession) -> list[Member]:
     """All active users (the carpool's members) with their away periods, for `carpool`."""
     users = await session.scalars(
