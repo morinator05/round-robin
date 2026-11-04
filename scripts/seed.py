@@ -1,10 +1,10 @@
 """Seed the database with test residents, optionally with a simulated history.
 
-    uv run python scripts/seed.py                  # 15 residents
+    uv run python scripts/seed.py                  # 10 residents
     uv run python scripts/seed.py -n 20 --password test1234
     uv run python scripts/seed.py --days 30        # plus a simulated month of duties
 
-Usernames are the lowercase first names; existing usernames are skipped, so it is
+Usernames are the lowercase names; existing usernames are skipped, so it is
 safe to run more than once. Current trips that nobody has driven yet get their
 potential drivers chosen again, so everyone rides along (on startup the app may have
 created them while only the floor speaker existed). Afterwards today's duties are assigned.
@@ -35,14 +35,11 @@ from app.models import Duty, PotentialDriver, Status, Strike, Trip, User  # noqa
 from app.services import duties, jobs, users  # noqa: E402
 
 # fmt: off
-FIRST_NAMES = [
-    "Anna", "Ben", "Clara", "David", "Emma", "Felix", "Greta", "Hannes", "Ida", "Jonas",
-    "Kim", "Lukas", "Mia", "Noah", "Olivia", "Paul", "Quinn", "Rosa", "Simon", "Tara",
-    "Uwe", "Vera", "Wim", "Xenia", "Yusuf", "Zoe",
-]
-LAST_NAMES = [
-    "Müller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker",
-    "Schulz", "Hoffmann", "Koch", "Richter", "Klein", "Wolf", "Neumann", "Schwarz",
+# Star Trek (TOS and TNG) nicknames, so no test resident shares a real resident's name
+NAMES = [
+    "Picard", "Kirk", "Riker", "Spock", "Data", "McCoy", "Worf", "Scotty", "Troi", "Uhura",
+    "Crusher", "Sulu", "Geordi", "Chekov", "Yar", "Guinan", "Chapel", "Wesley", "Rand",
+    "Barclay", "Pike", "Pulaski", "Sarek", "Ro", "Lwaxana",
 ]
 # fmt: on
 
@@ -178,8 +175,8 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
 
 
 async def main(count: int, password: str, days: int, seed: int | None) -> None:
-    if count > len(FIRST_NAMES):
-        sys.exit(f"At most {len(FIRST_NAMES)} residents supported")
+    if count > len(NAMES):
+        sys.exit(f"At most {len(NAMES)} residents supported")
     async with SessionLocal() as session:
         reset = await reset_open_trips(session, settings.today())
         if days and await session.scalar(select(func.count(Trip.id))):
@@ -187,14 +184,14 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
         existing = set(await session.scalars(select(User.username)))
         added = 0
         for i in range(count):
-            first = FIRST_NAMES[i]
-            username = first.lower()
+            name = NAMES[i]
+            username = name.lower()
             if username in existing:
                 continue
             await users.create(
                 session,
-                name=f"{first} {LAST_NAMES[i % len(LAST_NAMES)]}",
-                room_number=f"A4{i + 1:02d}",
+                name=name,
+                room_number=f"E1{i + 1:02d}",
                 username=username,
                 password=password,
             )
@@ -210,7 +207,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("-n", "--count", type=int, default=15)
+    parser.add_argument("-n", "--count", type=int, default=10)
     parser.add_argument("--password", default="passwort123")
     parser.add_argument("--days", type=int, default=0, help="simulate this many past days")
     parser.add_argument("--random-seed", type=int, help="same number, same history")

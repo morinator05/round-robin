@@ -1,7 +1,23 @@
-# Round Robin A4
+# Round Robin
 
-Web app for the cleaning duties on dorm floor A4: assigns kitchen and trash duty fairly,
+Web app for the cleaning duties on a dorm floor: assigns kitchen and trash duty fairly,
 tracks who did it and gives strikes for missed duties. The UI is in English.
+
+## Screenshots
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-light.png" width="820" alt="Overview: today's kitchen and trash duty and the plan for the next 14 days"></picture>
+
+| Statistics | History |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/statistics-dark.png"><img src="docs/screenshots/statistics-light.png" width="400" alt="Statistics"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history-light.png" width="400" alt="History"></picture> |
+| **My profile** | **Admin** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/profile-dark.png"><img src="docs/screenshots/profile-light.png" width="400" alt="My profile"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/admin-dark.png"><img src="docs/screenshots/admin-light.png" width="400" alt="Admin"></picture> |
+
+<details><summary>On a phone</summary>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-mobile-dark.png"><img src="docs/screenshots/overview-mobile-light.png" width="300" alt="Overview on a phone"></picture>
+
+</details>
 
 ## Rules
 
@@ -52,7 +68,7 @@ it are reassigned immediately. Deleting the absence doesn't give them back.
 - Give and revoke strikes; run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
-- Room numbers like `A403`: building, floor, room 01–99.
+- Room numbers like `E103`: building, floor, room 01–99.
 
 **Daily job** (8:05): marks missed duties and gives the strikes, then assigns
 today's kitchen and this week's trash duty. Residents who become unavailable (away, paused,
@@ -78,6 +94,7 @@ In `.env`, see `.env.example`.
 | `POSTGRES_PASSWORD` | `a4` | Database password. Use a random one on a server. |
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
+| `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
 | `DEADLINE_HOUR` | `8` | Deadline hour …; the next people are chosen right after it. |
 | `DEADLINE_DAYS_AFTER` | `1` | … this many days after the duty ends. |
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |

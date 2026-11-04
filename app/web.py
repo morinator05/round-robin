@@ -67,6 +67,7 @@ templates.env.globals["help_link"] = help_link
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
+templates.env.globals["floor_name"] = settings.floor_name
 templates.env.globals["min_password_length"] = auth.MIN_PASSWORD_LENGTH
 # Appended to the stylesheet URL, so browsers load it again after it changed instead of
 # keeping an old copy from their cache.

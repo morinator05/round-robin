@@ -16,7 +16,7 @@ class UserError(Exception):
     """Invalid input; the message is German and shown to the user as is."""
 
 
-# Building letter, floor digit, room 01-99 on that floor: A403.
+# Building letter, floor digit, room 01-99 on that floor: E103.
 ROOM_PATTERN = re.compile(r"[A-Z][0-9](0[1-9]|[1-9][0-9])")
 
 
@@ -24,11 +24,11 @@ def check_room(room_number: str) -> str:
     """The room number, trimmed and upper case.
 
     Raises:
-        UserError: if it isn't like A403 (letter, floor, room 01-99).
+        UserError: if it isn't like E103 (letter, floor, room 01-99).
     """
     room_number = room_number.strip().upper()
     if not ROOM_PATTERN.fullmatch(room_number):
-        raise UserError(f'Invalid room "{room_number}": letter, floor, room 01–99, e.g. A403')
+        raise UserError(f'Invalid room "{room_number}": letter, floor, room 01–99, e.g. E103')
     return room_number
 
 
