@@ -7,6 +7,7 @@ doesn't submit the form again.
 
 from dataclasses import replace
 from datetime import date, timedelta
+from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
 
@@ -21,8 +22,9 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session
+from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
-from app.services import auth, duties, jobs, strikes, users
+from app.services import auth, carpool, duties, jobs, strikes, users
 from app.services.carpool import Role
 from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
@@ -38,7 +40,7 @@ def person_html(user: User | None, is_me: bool = False) -> Markup:
     `is_me` highlights the logged-in user's own entry, so they find themselves quickly.
     """
     if user is None:
-        return Markup('<span class="muted">ehemalig</span>')
+        return Markup('<span class="muted">former resident</span>')
     html = Markup('<span class="person-name">{}</span> <span class="room">{}</span>').format(
         user.first_name, user.room_number
     )
@@ -57,14 +59,14 @@ def person(context, user: User | None) -> Markup:
 
 @pass_context
 def role(context, r: Role) -> Markup:
-    """A preview stand-in: "Erledigt" (whoever drives) or "Ausgelassen" (whoever doesn't).
+    """A preview stand-in: "Done" (whoever drives) or "Skipped" (whoever doesn't).
 
     For an earlier trip nobody has driven yet (yesterday's before the deadline), its date
     follows. Green with a tick if driven, amber with a cross if not.
     """
-    text = "Erledigt" if r.drove else "Ausgelassen"
+    text = "Done" if r.drove else "Skipped"
     if r.start != context.get("today"):
-        text += f" {r.start:%d.%m.}"
+        text += f" {short_date(r.start)}"
     css = "role role-done" if r.drove else "role role-skip"
     return Markup('<span class="{}"><span aria-hidden="true">{}</span> {}</span>').format(
         css, "✓" if r.drove else "✗", text
@@ -74,8 +76,8 @@ def role(context, r: Role) -> Markup:
 def help_link(topic: str) -> Markup:
     """A small "?" after a heading, linking to that topic on the help page."""
     return Markup(
-        '<a class="help-link" href="/help#{}" title="Wie funktioniert das?" '
-        'aria-label="Wie funktioniert das?">?</a>'
+        '<a class="help-link" href="/help#{}" title="How does this work?" '
+        'aria-label="How does this work?">?</a>'
     ).format(topic)
 
 
@@ -92,11 +94,14 @@ templates.env.globals["min_password_length"] = auth.MIN_PASSWORD_LENGTH
 templates.env.globals["css_version"] = int(
     (Path(__file__).parent / "static" / "style.css").stat().st_mtime
 )
-templates.env.filters["short_date"] = lambda d: f"{d:%d.%m.}" if d else ""
+templates.env.filters["short_date"] = short_date
+templates.env.filters["long_date"] = long_date
 templates.env.filters["date_time"] = lambda d: (
-    f"{d.astimezone(settings.tz):%d.%m.%Y %H:%M}" if d else ""
+    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}" if d else ""
 )
-templates.env.filters["weekday"] = lambda d: ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][d.weekday()]
+# Points with their sign: "+37", "-112", "0".
+templates.env.filters["signed"] = lambda n: f"{n:+d}" if n else "0"
+templates.env.filters["weekday"] = lambda d: f"{d:%a}"
 
 
 def flash(request: Request, message: str, kind: str = "ok") -> None:
@@ -170,13 +175,13 @@ async def login(
     client_ip = request.client.host if request.client else "unknown"
     throttle_key = f"{username.strip().lower()}@{client_ip}"
     if login_throttle.is_blocked(throttle_key):
-        flash(request, "Zu viele Fehlversuche, bitte in 15 Minuten nochmal versuchen", "error")
+        flash(request, "Too many failed attempts, please try again in 15 minutes", "error")
         return redirect(f"/login?next={safe_next(next)}")
 
     user = await auth.authenticate(session, username, password)
     if user is None:
         login_throttle.record_failure(throttle_key)
-        flash(request, "Benutzername oder Passwort falsch", "error")
+        flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
     request.session["user_id"] = user.id
@@ -231,7 +236,7 @@ async def dashboard(request: Request, session: Session, user: OptionalUser):
 async def mark_as_driver(
     request: Request, session: Session, user: CurrentUser, potential_driver_id: int
 ):
-    """Mark who drove (did the duty), from the dashboard card or the Flursprecher page."""
+    """Mark who drove (did the duty), from the dashboard card or the admin page."""
     # The dashboard card posts with `card=1` and swaps only itself with the response.
     is_card_request = bool(request.headers.get("HX-Request") and request.query_params.get("card"))
     try:
@@ -251,7 +256,7 @@ async def mark_as_driver(
             "partials/duty_card.html",
             {**duty_card_ctx(trip, trip.duty, user), "user": user},
         )
-    flash(request, "Als erledigt eingetragen")
+    flash(request, "Marked as done")
     return redirect(safe_next(request.query_params.get("next")))
 
 
@@ -299,7 +304,7 @@ async def add_away(
     try:
         await users.add_away(session, user, start_date, end_date, settings.today())
         await session.commit()
-        flash(request, "Abwesenheit eingetragen")
+        flash(request, "Away period added")
     except UserError as e:
         flash(request, str(e), "error")
     return redirect("/me")
@@ -307,13 +312,13 @@ async def add_away(
 
 @router.post("/me/away/{away_id}/delete")
 async def delete_away(request: Request, session: Session, user: CurrentUser, away_id: int):
-    """Delete an away period (your own, or anyone's as Flursprecher)."""
+    """Delete an away period (your own, or anyone's as floor speaker)."""
     away = await session.get(AwayPeriod, away_id)
     if away is None or (away.user_id != user.id and not user.is_admin):
         raise HTTPException(404)
     await users.remove_away(session, away)
     await session.commit()
-    flash(request, "Abwesenheit gelöscht")
+    flash(request, "Away period deleted")
     return redirect("/me")
 
 
@@ -327,13 +332,13 @@ async def change_password(
 ):
     """Change your own password."""
     if not auth.verify_password(old_password, user.password_hash):
-        flash(request, "Altes Passwort falsch", "error")
+        flash(request, "Old password is wrong", "error")
     elif len(new_password) < auth.MIN_PASSWORD_LENGTH:
         flash(request, auth.PASSWORD_TOO_SHORT, "error")
     else:
         user.password_hash = auth.hash_password(new_password)
         await session.commit()
-        flash(request, "Passwort geändert")
+        flash(request, "Password changed")
     return redirect("/me")
 
 
@@ -390,12 +395,20 @@ async def stats(request: Request, session: Session, user: OptionalUser):
         key = (uid, duty, "penalty" if is_penalty else status)
         counts[key] = counts.get(key, 0) + 1
     active = {u.id: len(await strikes.active_strikes(session, u.id)) for u in all_users}
+    # Whole points per duty instead of fractions; ties go by who is chosen next.
+    ids = [u.id for u in all_users]
+    rooms = {u.id: u.room_number for u in all_users}
+    points = {}
+    for d, b in balances.items():
+        queue = carpool.choose_potential_drivers(b, ids, len(ids), rooms)
+        scores = {uid: b[uid].score if uid in b else Fraction(0) for uid in ids}
+        points[d] = carpool.display_points(scores, queue)
     return render(
         request,
         "stats.html",
         user,
         users=all_users,
-        balances=balances,
+        points=points,
         counts=counts,
         active=active,
     )
@@ -421,7 +434,7 @@ async def help_page(request: Request, user: OptionalUser):
 
 @router.get("/admin")
 async def admin(request: Request, session: Session, user: AdminUser):
-    """Flursprecher page: residents, strikes and recent duties."""
+    """admin page: residents, strikes and recent duties."""
     all_users = await users.list_users(session)
     since = settings.today() - timedelta(days=14)
     trips = await session.scalars(
@@ -469,7 +482,7 @@ async def admin_create_user(
         )
         await duties.fill_current(session, settings.today())
         await session.commit()
-        flash(request, f"{new.display_name} hinzugefügt")
+        flash(request, f"{new.display_name} added")
     except UserError as e:
         flash(request, str(e), "error")
     return redirect("/admin")
@@ -511,7 +524,7 @@ async def admin_edit_user(
     if password:
         target.password_hash = auth.hash_password(password)
     await session.commit()
-    flash(request, f"{target.display_name} gespeichert")
+    flash(request, f"{target.display_name} saved")
     return redirect("/admin")
 
 
@@ -521,7 +534,7 @@ async def admin_toggle_active(request: Request, session: Session, user: AdminUse
     target = await _get_user(session, user_id)
     await users.set_active(session, target, not target.active, settings.today())
     await session.commit()
-    flash(request, f"{target.display_name} ist jetzt {'aktiv' if target.active else 'inaktiv'}")
+    flash(request, f"{target.display_name} is now {'active' if target.active else 'inactive'}")
     return redirect("/admin")
 
 
@@ -530,12 +543,12 @@ async def admin_delete_user(request: Request, session: Session, user: AdminUser,
     """Delete a resident who moved out (not yourself)."""
     target = await _get_user(session, user_id)
     if target.id == user.id:
-        flash(request, "Du kannst dich nicht selbst löschen", "error")
+        flash(request, "You can't delete yourself", "error")
         return redirect("/admin")
     name = target.display_name
     await users.delete(session, target, settings.today())
     await session.commit()
-    flash(request, f"{name} gelöscht")
+    flash(request, f"{name} deleted")
     return redirect("/admin")
 
 
@@ -557,7 +570,7 @@ async def admin_issue_strike(
         today=settings.today(),
     )
     await session.commit()
-    flash(request, f"Strike an {target.display_name} vergeben")
+    flash(request, f"Strike given to {target.display_name}")
     return redirect("/admin")
 
 
@@ -569,7 +582,7 @@ async def admin_revoke_strike(request: Request, session: Session, user: AdminUse
         raise HTTPException(404)
     await strikes.revoke(session, strike, settings.now())
     await session.commit()
-    flash(request, "Strike zurückgenommen")
+    flash(request, "Strike revoked")
     return redirect("/admin")
 
 
@@ -582,7 +595,7 @@ async def admin_excuse(
         pd = await duties.get_potential_driver(session, potential_driver_id)
         await duties.excuse(session, pd, user, settings.now())
         await session.commit()
-        flash(request, "Dienst entschuldigt")
+        flash(request, "Duty excused")
     except DutyError as e:
         flash(request, str(e), "error")
     return redirect("/admin")
@@ -597,8 +610,8 @@ async def admin_dispute(
         pd = await duties.get_potential_driver(session, potential_driver_id)
         await duties.dispute(session, pd, user, settings.now())
         await session.commit()
-        name = pd.user.display_name if pd.user else "ehemalig"
-        flash(request, f"Beanstandet, {name} bekommt einen Strike")
+        name = pd.user.display_name if pd.user else "the former resident"
+        flash(request, f"Disputed, {name} gets a strike")
     except DutyError as e:
         flash(request, str(e), "error")
     return redirect(safe_next(request.query_params.get("next") or "/history"))
@@ -608,5 +621,5 @@ async def admin_dispute(
 async def admin_tick(request: Request, session: Session, user: AdminUser):
     """Run the daily job now."""
     await jobs.daily_tick(session, settings.now())
-    flash(request, "Tagesjob ausgeführt")
+    flash(request, "Daily job done")
     return redirect("/admin")

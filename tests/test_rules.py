@@ -1,6 +1,7 @@
 """Rules against a real database: assigning, deadlines, strikes, moving out, web pages."""
 
 import random
+import re
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
 
@@ -27,7 +28,7 @@ def at(day: date, hour: int = 9) -> datetime:
 
 
 async def make_users(session, n=15, admin=True):
-    """`n` residents p1..pn (password "secret123"); p1 is the Flursprecher if `admin`."""
+    """`n` residents p1..pn (password "secret123"); p1 is the floor speaker if `admin`."""
     created = []
     for i in range(1, n + 1):
         created.append(
@@ -96,7 +97,7 @@ async def test_three_strikes_give_penalty_in_next_free_week(session):
     ]
     assert len(await strikes.active_strikes(session, a.id)) == 0
 
-    # The penalty week replaces the regular Mülldienst.
+    # The penalty week replaces the regular trash duty.
     await jobs.daily_tick(session, at(MONDAY + timedelta(days=7)))
     trip = await duties.get_trip(session, Duty.trash, MONDAY + timedelta(days=7))
     assert trip.is_penalty and [x.user_id for x in trip.potential_drivers] == [a.id]
@@ -138,7 +139,7 @@ async def test_mark_as_driver_permissions(session):
     with pytest.raises(DutyError):
         await duties.mark_as_driver(session, first, p2, at(MONDAY, 20))
 
-    # Too late for a resident, but the Flursprecher can still do it.
+    # Too late for a resident, but the floor speaker can still do it.
     tuesday = MONDAY + timedelta(days=1)
     _, t_first, _, t1, _ = await kitchen_pair(session, people, tuesday)
     with pytest.raises(DutyError):
@@ -363,7 +364,7 @@ async def test_web_permissions(session, client):
     r = await client.get("/me")
     assert r.status_code == 303 and r.headers["location"].startswith("/login")
     r = await client.get("/")
-    assert r.status_code == 200 and "Küchendienst" in r.text
+    assert r.status_code == 200 and "Kitchen duty" in r.text
 
     await login(client, "p2")
     assert (await client.get("/admin")).status_code == 403
@@ -383,14 +384,14 @@ async def test_web_permissions(session, client):
 async def test_help_page(session, client):
     await make_users(session, n=3)
     r = await client.get("/help")
-    assert r.status_code == 200 and "Küchendienst" in r.text
-    assert "Für den Flursprecher" not in r.text
+    assert r.status_code == 200 and "Kitchen duty" in r.text
+    assert "For the floor speaker" not in r.text
 
     await login(client, "p2")
-    assert "Für den Flursprecher" not in (await client.get("/help")).text
+    assert "For the floor speaker" not in (await client.get("/help")).text
     await client.post("/logout")
     await login(client, "p1")
-    assert "Für den Flursprecher" in (await client.get("/help")).text
+    assert "For the floor speaker" in (await client.get("/help")).text
 
 
 async def test_understaffed_trip_is_topped_up(session):
@@ -413,16 +414,17 @@ async def test_history_page_and_dispute(session, client):
     assert (await client.get("/history")).status_code == 303  # login required
     await login(client, "p2")
     r = await client.get("/history")
-    assert r.status_code == 200 and str(person_html(p1)) in r.text and "Beanstanden" not in r.text
+    assert r.status_code == 200 and str(person_html(p1)) in r.text
+    assert ">Dispute</button>" not in r.text
     assert (await client.post(f"/admin/potential-drivers/{first.id}/dispute")).status_code == 403
 
     await client.post("/logout")
     await login(client, "p1")
     r = await client.get("/history")
-    assert "Beanstanden" in r.text
+    assert ">Dispute</button>" in r.text
     r = await client.post(f"/admin/potential-drivers/{first.id}/dispute?next=/history")
     assert r.status_code == 303
-    assert "beanstandet" in (await client.get("/history")).text
+    assert ">disputed<" in (await client.get("/history")).text
 
 
 async def test_top_up_skips_trip_that_is_already_driven(session):
@@ -470,11 +472,11 @@ async def test_login_is_blocked_after_too_many_failures(session, client, monkeyp
     await make_users(session, n=2)
     for _ in range(3):
         r = await client.post("/login", data={"username": "p2", "password": "wrong"})
-        assert "Benutzername oder Passwort falsch" in (await client.get(r.headers["location"])).text
+        assert "Wrong username or password" in (await client.get(r.headers["location"])).text
 
     # Even the right password is refused while blocked.
     r = await client.post("/login", data={"username": "p2", "password": "secret123"})
-    assert "Zu viele Fehlversuche" in (await client.get(r.headers["location"])).text
+    assert "Too many failed attempts" in (await client.get(r.headers["location"])).text
     assert (await client.get("/me")).status_code == 303
     # Other users can still log in.
     await login(client, "p1")
@@ -571,6 +573,19 @@ async def test_own_name_is_highlighted(session, client):
     text = (await client.get("/stats")).text
     assert str(person_html(people[1], is_me=True)) in text
     assert str(person_html(people[0])) in text
+
+
+async def test_stats_shows_whole_points(session, client):
+    """Scores 2/3, -1/3, -1/3 are shown as whole points that still sum to 0."""
+    people = await make_users(session, n=3)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await session.commit()
+    text = (await client.get("/stats")).text
+    cells = re.findall(r'<td class="points">([^<]*)</td>', text)
+    kitchen = [int(c) for c in cells[::2]]
+    assert sorted(kitchen) == [-34, -33, 67]
+    assert all(c == "0" for c in cells[1::2])
 
 
 async def test_stats_colour_strikes(session, client):

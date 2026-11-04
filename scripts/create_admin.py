@@ -1,4 +1,4 @@
-"""Create the first Flursprecher account: uv run python scripts/create_admin.py"""
+"""Create the first floor speaker account: uv run python scripts/create_admin.py"""
 
 import asyncio
 import getpass
@@ -29,7 +29,7 @@ async def main() -> None:
         except users.UserError as e:
             sys.exit(str(e))
         await session.commit()
-        print(f"Flursprecher {user.name} (@{user.username}) angelegt.")
+        print(f"Floor speaker {user.name} (@{user.username}) created.")
 
 
 asyncio.run(main())

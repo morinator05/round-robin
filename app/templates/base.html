@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,19 +10,19 @@
 <body hx-boost="true">
   <nav>
     <a class="brand" href="/">Round Robin A4</a>
-    <a href="/">Übersicht</a>
-    <a href="/stats">Statistik</a>
+    <a href="/">Overview</a>
+    <a href="/stats">Statistics</a>
     {% if user %}
-      <a href="/history">Verlauf</a>
-      <a href="/me">Mein Profil</a>
-      {% if user.is_admin %}<a href="/admin">Verwaltung</a>{% endif %}
+      <a href="/history">History</a>
+      <a href="/me">My profile</a>
+      {% if user.is_admin %}<a href="/admin">Admin</a>{% endif %}
     {% endif %}
-    <a href="/help">So funktioniert's</a>
+    <a href="/help">How it works</a>
     {% if user %}
-      <span class="nav-user">Angemeldet als {{ person(user) }}</span>
-      <form method="post" action="/logout"><button class="link">Abmelden</button></form>
+      <span class="nav-user">Logged in as {{ person(user) }}</span>
+      <form method="post" action="/logout"><button class="link">Log out</button></form>
     {% else %}
-      <a class="nav-user" href="/login">Anmelden</a>
+      <a class="nav-user" href="/login">Log in</a>
     {% endif %}
   </nav>
   <main>

@@ -1,16 +1,16 @@
 {# One duty card on the dashboard. Expects: trip (or None), duty, deadline,
    can_mark_as_driver(potential driver).
-   Also returned alone by the "Erledigt" button, which swaps the card via htmx. #}
+   Also returned alone by the "Done" button, which swaps the card via htmx. #}
 <section class="card" id="card-{{ duty.value }}">
   <h2>
     {{ duty.label }}
     <span class="muted">
-      {% if duty == Duty.kitchen %}heute{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
+      {% if duty == Duty.kitchen %}today{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
     </span>
   </h2>
-  {% if trip and trip.is_penalty %}<p class="penalty">Straf-Mülldienst ({{ strike_threshold }} Strikes)</p>{% endif %}
+  {% if trip and trip.is_penalty %}<p class="penalty">Penalty trash duty ({{ strike_threshold }} strikes)</p>{% endif %}
   {% if not trip or not trip.potential_drivers %}
-    <p class="muted">Niemand eingeteilt.</p>
+    <p class="muted">Nobody assigned.</p>
   {% else %}
     {% for pd in trip.potential_drivers %}
       <div class="person">
@@ -19,7 +19,7 @@
         </div>
         {% if can_mark_as_driver(pd) %}
           <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
-                  hx-target="#card-{{ duty.value }}" hx-swap="outerHTML">Erledigt</button>
+                  hx-target="#card-{{ duty.value }}" hx-swap="outerHTML">Done</button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
@@ -27,10 +27,10 @@
     {% endfor %}
     {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
     {% if driver %}
-      <p class="muted">Erledigt von {{ person(driver.user) }}
-        am {{ driver.completed_at|date_time }}</p>
+      <p class="muted">Done by {{ person(driver.user) }}
+        on {{ driver.completed_at|date_time }}</p>
     {% else %}
-      <p class="muted">Eintragen bis {{ deadline|date_time }}</p>
+      <p class="muted">Mark as done by {{ deadline|date_time }}</p>
     {% endif %}
   {% endif %}
 </section>

@@ -1,87 +1,88 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>So funktioniert's</h1>
-<p>Auf unserem Flur teilen wir uns zwei Putzdienste. Diese Seite teilt sie gerecht auf und merkt
-  sich, wer was gemacht hat.</p>
+<h1>How it works</h1>
+<p>On our floor we share two cleaning duties. This site splits them fairly and keeps track of
+  who did what.</p>
 
-<section class="card help" id="dienste">
-  <h2>Die Dienste</h2>
-  <p><strong>Küchendienst</strong>: jeden Tag, die Gemeinschaftsküche aufräumen und sauber machen.
-    {% if kitchen_people > 1 %}Es sind {{ kitchen_people }} Leute eingeteilt, aber nur eine Person
-    muss putzen. Sprecht euch ab.{% endif %}</p>
-  <p><strong>Mülldienst</strong>: eine Woche lang (Montag bis Sonntag) den Müll rausbringen.
-    {% if trash_people > 1 %}Es sind {{ trash_people }} Leute eingeteilt, eine Person reicht.{% endif %}</p>
-  <p class="muted">Was genau dazugehört, erklärt dir der Flursprecher.</p>
+<section class="card help" id="duties">
+  <h2>The duties</h2>
+  <p><strong>Kitchen duty</strong>: every day, tidy up and clean the shared kitchen.
+    {% if kitchen_people > 1 %}{{ kitchen_people }} people are assigned, but only one of them
+    has to clean. Talk to each other.{% endif %}</p>
+  <p><strong>Trash duty</strong>: for one week (Monday to Sunday), take out the trash.
+    {% if trash_people > 1 %}{{ trash_people }} people are assigned, one of them is enough.{% endif %}</p>
+  <p class="muted">The floor speaker will tell you what exactly is part of it.</p>
 </section>
 
-<section class="card help" id="vorschau">
-  <h2>Wann bin ich dran?</h2>
-  <p>Die Seite teilt automatisch ein: Dran ist, wer bisher im Verhältnis am wenigsten geputzt hat.
-    Wer neu einzieht, fängt bei null an.</p>
-  <p>Auf der <a href="/">Übersicht</a> siehst du die Dienste von heute und den Plan für die nächsten
-    {{ preview_days }} Tage. Dein eigener Name ist <span class="me">farbig</span> markiert. Der Plan kann
-    sich noch ändern, z.&nbsp;B. wenn jemand einen Dienst verpasst oder sich abwesend meldet.</p>
-  <p>Sind die Leute von heute noch nicht fertig, stehen im Küchen-Plan statt ihrer Namen
-    <span class="role role-done"><span aria-hidden="true">✓</span> Erledigt</span> und
-    <span class="role role-skip"><span aria-hidden="true">✗</span> Ausgelassen</span>: So siehst du,
-    wann du wieder dran bist, je nachdem, ob du heute putzt (und es bis Mitternacht einträgst) oder nicht.</p>
+<section class="card help" id="preview">
+  <h2>When is it my turn?</h2>
+  <p>The site assigns duties automatically: it's the turn of whoever has cleaned the least so far,
+    relative to everyone else. If you're new, you start at zero.</p>
+  <p>The <a href="/">overview</a> shows today's duties and the plan for the next
+    {{ preview_days }} days. Your own name is <span class="me">highlighted</span>. The plan can
+    still change, e.g. when someone misses a duty or is away.</p>
+  <p>If today's people aren't done yet, the kitchen plan shows
+    <span class="role role-done"><span aria-hidden="true">✓</span> Done</span> and
+    <span class="role role-skip"><span aria-hidden="true">✗</span> Skipped</span> instead of their names:
+    that way you see when it's your turn again, depending on whether you clean today (and mark it
+    by midnight) or not.</p>
 </section>
 
-<section class="card help" id="eintragen">
-  <h2>Erledigt eintragen</h2>
-  <p>Hast du geputzt, klick auf der <a href="/">Übersicht</a> bei deinem Namen auf
-    <strong>Erledigt</strong>. Nur wer wirklich geputzt hat, trägt sich ein.</p>
-  <p>Frist: {{ deadline_hour }}:00 Uhr
-    {% if deadline_days_after == 1 %}am Tag nach dem Dienst, beim Mülldienst also am Montag nach deiner Woche.
-    {% else %}{{ deadline_days_after }} Tage nach dem Dienst.{% endif %}
-    Danach gilt der Dienst als verpasst.</p>
+<section class="card help" id="marking">
+  <h2>Marking a duty as done</h2>
+  <p>Once you've cleaned, click <strong>Done</strong> next to your name on the
+    <a href="/">overview</a>. Only whoever actually cleaned marks it.</p>
+  <p>Deadline: {{ deadline_hour }}:00
+    {% if deadline_days_after == 1 %}on the day after the duty, so for trash duty the Monday after your week.
+    {% else %}{{ deadline_days_after }} days after the duty.{% endif %}
+    After that the duty counts as missed.</p>
 </section>
 
 <section class="card help" id="status">
-  <h2>Was bedeuten die Status?</h2>
+  <h2>What do the statuses mean?</h2>
   <div class="table-wrap"><table>
-    <tr><td><span class="badge s-pending">offen</span></td><td>Noch nicht eingetragen, die Frist läuft noch.</td></tr>
-    <tr><td><span class="badge s-drove">erledigt</span></td><td>Geputzt und eingetragen.</td></tr>
-    <tr><td><span class="badge s-rode">nicht nötig</span></td><td>Jemand anderes aus deinem Dienst hat geputzt. Kein Strike, zählt aber auch nicht als geputzt.</td></tr>
-    <tr><td><span class="badge s-missed">verpasst</span></td><td>Bis zur Frist hat niemand eingetragen. Alle Eingeteilten bekommen einen Strike.</td></tr>
-    <tr><td><span class="badge s-missed">beanstandet</span></td><td>Eingetragen, aber nicht geputzt. Gibt einen Strike.</td></tr>
-    <tr><td><span class="badge s-excused">entschuldigt</span></td><td>Vom Flursprecher entschuldigt: kein Strike, zählt aber auch nicht als geputzt.</td></tr>
+    <tr><td><span class="badge s-pending">open</span></td><td>Not marked yet, the deadline hasn't passed.</td></tr>
+    <tr><td><span class="badge s-drove">done</span></td><td>Cleaned and marked.</td></tr>
+    <tr><td><span class="badge s-rode">not needed</span></td><td>Someone else on your duty cleaned. No strike, but it doesn't count as cleaned either.</td></tr>
+    <tr><td><span class="badge s-missed">missed</span></td><td>Nobody marked it by the deadline. Everyone assigned gets a strike.</td></tr>
+    <tr><td><span class="badge s-missed">disputed</span></td><td>Marked, but not cleaned. Gives a strike.</td></tr>
+    <tr><td><span class="badge s-excused">excused</span></td><td>Excused by the floor speaker: no strike, but it doesn't count as cleaned either.</td></tr>
   </table></div>
 </section>
 
 <section class="card help" id="strikes">
   <h2>Strikes</h2>
-  <p>Einen Strike gibt es für einen verpassten oder beanstandeten Dienst, oder vom Flursprecher.
-    Trägt der Flursprecher einen verpassten Dienst nach oder entschuldigt ihn, fällt der Strike weg.</p>
-  <p>Bei {{ strike_threshold }} Strikes bekommst du einen <span class="penalty">Straf-Mülldienst</span>:
-    eine Woche Mülldienst, die nicht als geputzt zählt. Danach sind die {{ strike_threshold }} Strikes weg.
-    Deine Strikes siehst du unter <a href="/me">Mein Profil</a>.</p>
+  <p>You get a strike for a missed or disputed duty, or from the floor speaker. If the floor speaker marks a
+    missed duty as done afterwards or excuses it, the strike is dropped.</p>
+  <p>At {{ strike_threshold }} strikes you get a <span class="penalty">penalty trash duty</span>:
+    one week of trash duty that doesn't count as cleaned. After that the {{ strike_threshold }} strikes are gone.
+    You can see your strikes under <a href="/me">My profile</a>.</p>
 </section>
 
-<section class="card help" id="abwesend">
-  <h2>Abwesend</h2>
-  <p>Bist du weg, z.&nbsp;B. im Urlaub, trag es unter <a href="/me">Mein Profil</a> → Abwesenheit ein.
-    In der Zeit wirst du nicht eingeteilt, und es zählt nicht gegen dich. Dienste, die in die Zeit
-    fallen, übernimmt sofort jemand anderes.</p>
+<section class="card help" id="away">
+  <h2>Away</h2>
+  <p>If you're away, e.g. on holiday, add it under <a href="/me">My profile</a> → Away.
+    You won't be assigned during that time, and it doesn't count against you. Duties that fall into
+    that time are taken over by someone else right away.</p>
 </section>
 
-<section class="card help" id="punkte">
-  <h2>Statistik</h2>
-  <p>„Punkte“ in der <a href="/stats">Statistik</a> sind die geputzten Dienste minus dem fairen Anteil.
-    Wer die wenigsten Punkte hat, ist als Nächstes dran. Eine positive Zahl heißt: mehr geputzt als
-    nötig, eine negative: noch Dienste offen. Ein Dienst, den niemand gemacht hat, zählt für niemanden.
-    Küche und Müll werden getrennt gezählt.</p>
+<section class="card help" id="points">
+  <h2>Statistics</h2>
+  <p>The "points" in the <a href="/stats">statistics</a> are the duties you cleaned minus your fair
+    share, 100 points per duty. Whoever has the fewest points is next. A positive number means you
+    cleaned more than needed, a negative one that you still have duties to catch up on. All points
+    add up to 0. A duty nobody did counts for nobody. Kitchen and trash are counted separately.</p>
 </section>
 
 {% if user and user.is_admin %}
-<section class="card help" id="flursprecher">
-  <h2>Für den Flursprecher</h2>
-  <p><strong>Deaktivieren</strong>: Die Person wird nicht eingeteilt, z.&nbsp;B. bei längerer Abwesenheit.</p>
-  <p><strong>Auszug und Einzug</strong>: Den alten Bewohner löschen und die neue Person hinzufügen.
-    Nicht umbenennen, sonst übernimmt sie Verlauf und Strikes.</p>
-  <p><strong>Entschuldigen</strong> und <strong>Beanstanden</strong>: siehe <a href="#status">Status</a>.</p>
-  <p><strong>Tagesjob</strong>: läuft automatisch um 00:05 und {{ deadline_hour }}:05 Uhr, trägt verpasste
-    Dienste ein und teilt die nächsten ein.</p>
+<section class="card help" id="floor-speaker">
+  <h2>For the floor speaker</h2>
+  <p><strong>Deactivate</strong>: the person isn't assigned any duties, e.g. while away for a long time.</p>
+  <p><strong>Moving out and in</strong>: delete the old resident and add the new person.
+    Don't rename them, or the new person takes over their history and strikes.</p>
+  <p><strong>Excuse</strong> and <strong>Dispute</strong>: see <a href="#status">Status</a>.</p>
+  <p><strong>Daily job</strong>: runs automatically at 00:05 and {{ deadline_hour }}:05, marks missed
+    duties and assigns the next ones.</p>
 </section>
 {% endif %}
 {% endblock %}

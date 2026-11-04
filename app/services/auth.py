@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User
 
 MIN_PASSWORD_LENGTH = 8
-PASSWORD_TOO_SHORT = f"Das Passwort muss mindestens {MIN_PASSWORD_LENGTH} Zeichen haben"
+PASSWORD_TOO_SHORT = f"The password must have at least {MIN_PASSWORD_LENGTH} characters"
 
 _hasher = PasswordHash.recommended()
 # Checked when the username doesn't exist, so a wrong username takes as long as a wrong

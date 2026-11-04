@@ -27,6 +27,10 @@ Our extensions:
   `charge_riders`), and their score leaves with them. This is the one place the sum can
   differ from 0.
 
+Display: scores are exact fractions, but the statistics page shows them as whole points,
+`POINTS_PER_DUTY` per duty, rounded by the largest-remainder method so the shown points
+still sum to exactly what the scores sum to (see `display_points`).
+
 The preview can't know which potential driver of an undriven trip will drive it, so it
 replaces them by `Role`s: the one who drives (with the drive) and the ones who don't.
 
@@ -34,11 +38,15 @@ Everything in here is pure (no database) so it can be tested and simulated cheap
 """
 
 import copy
+import math
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from fractions import Fraction
+
+# One duty is shown as this many points.
+POINTS_PER_DUTY = 100
 
 
 @dataclass
@@ -151,6 +159,29 @@ def credit_driver(balances: dict[int, Balance], uid: int, on: date) -> None:
 def reserve_share(balances: dict[int, Balance], uid: int, amount: Fraction) -> None:
     """Book `amount` of a trip `uid` is a potential driver on, not driven yet."""
     balances.setdefault(uid, Balance()).pending_share += amount
+
+
+def display_points(scores: dict[int, Fraction], queue: Sequence[int] = ()) -> dict[int, int]:
+    """Scores as whole points (`POINTS_PER_DUTY` per duty) that sum to the rounded total.
+
+    Largest-remainder method: every scaled score is rounded down, then the points still
+    missing to the total go to the largest remainders, one each. So every value is less than
+    1 point from the exact one, a lower score never shows more points, and with all scores
+    summing to 0 the points do too. Equal remainders: whoever comes later in `queue` (the
+    order they will be chosen in) gets the point first, so among equal scores whoever is
+    next shows fewer points; then by id.
+    """
+    scaled = {uid: s * POINTS_PER_DUTY for uid, s in scores.items()}
+    points = {uid: math.floor(v) for uid, v in scaled.items()}
+    missing = round(sum(scaled.values(), Fraction(0))) - sum(points.values())
+    position = {uid: i for i, uid in enumerate(queue)}
+
+    def key(uid: int):
+        return (points[uid] - scaled[uid], -position.get(uid, -1), uid)
+
+    for uid in sorted(scaled, key=key)[:missing]:
+        points[uid] += 1
+    return points
 
 
 def _replace_by_roles(

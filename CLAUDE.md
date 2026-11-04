@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Round Robin A4 assigns kitchen duty (daily, 2 people, one of them cleans) and trash duty (weekly,
 1 person) on a dorm floor fairly, tracks who did it and gives strikes for missed duties. The
 app's rules (fairness, deadlines, strikes, absences, admin powers) are in `README.md`; that
-is the spec for behaviour. The UI text is German.
+is the spec for behaviour. The UI text is English.
 
 ## Commands
 
@@ -20,7 +20,7 @@ uv run pytest tests/test_rules.py::test_tick_assigns_kitchen_and_trash   # one t
 uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
 uv run python scripts/seed.py [--days 30]   # test residents (+ a simulated month on an empty DB)
-uv run python scripts/create_admin.py       # first Flursprecher (admin) account
+uv run python scripts/create_admin.py       # first floor speaker (admin) account
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff and pytest against Postgres 16. With `CI` set, an
@@ -39,9 +39,11 @@ a **trip** is one kitchen day / one trash week, its **riders** are the members a
 for it (active, not away), and each rider is charged a fair share of `1/len(riders)`
 (`charge_riders`). Each trip gets `n` **potential drivers** (kitchen 2, trash 1); whoever
 marks it done is the **driver** and gets one drive (`credit_driver`). Score = drives −
-fair share (the paper's score; shown as "Punkte"). `choose_potential_drivers` takes the
-lowest `effective_score` (score plus `pending_share` of undriven trips they're already a
-potential driver on), ties broken by `last_drove`, then room. All values are `Fraction`s.
+fair share (the paper's score). The stats page shows it as whole points, 100 per duty,
+via `carpool.display_points` (largest-remainder rounding, so they still sum to 0).
+`choose_potential_drivers` takes the lowest `effective_score` (score plus `pending_share`
+of undriven trips they're already a potential driver on), ties broken by `last_drove`, then
+room. All values are `Fraction`s.
 `app/services/duties.load_balances` rebuilds every balance from the full trip history on
 each call, and only driven trips count (`duties.was_driven`), so scores sum to 0. The one
 deliberate exception: a moved-out resident's score leaves with them. `duties.preview`
@@ -75,13 +77,15 @@ current/upcoming trips and chooses replacements.
 
 **Layers.**
 - `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
-  They raise `DutyError` / `UserError` with a German, user-facing message.
+  They raise `DutyError` / `UserError` with an English, user-facing message.
 - `app/web.py`: all routes. They parse input, call a service, commit, and turn the
   service errors into a session flash. Every POST answers with a 303 redirect. htmx
   requests are detected via the `HX-Request` header.
 - `app/deps.py`: `Session`, `OptionalUser`, `CurrentUser`, `AdminUser` are `Annotated`
   route parameter types; `CurrentUser` raises `LoginRequired`, which `main.py` turns into a
   redirect to `/login`.
+- `app/formatting.py`: how dates are written (`short_date` "3 Nov", `long_date`
+  "3 Nov 2026"), for templates and strike reasons.
 - `app/config.py`: settings from `.env`. Use `settings.now()` / `settings.today()` (in the
   configured time zone), never `date.today()`. Services take `today` / `now` as arguments,
   which is how tests set the time.

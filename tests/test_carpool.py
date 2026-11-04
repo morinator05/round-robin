@@ -1,13 +1,24 @@
 """The pure carpool logic, simulated over many days without a database."""
 
+import itertools
 import random
 from collections import Counter
 from datetime import date, timedelta
+from fractions import Fraction
 from itertools import pairwise
 
 import pytest
 
-from app.services.carpool import Member, Role, charge_riders, credit_driver, plan, room_key
+from app.services.carpool import (
+    POINTS_PER_DUTY,
+    Member,
+    Role,
+    charge_riders,
+    credit_driver,
+    display_points,
+    plan,
+    room_key,
+)
 
 START = date(2026, 1, 5)  # a Monday
 
@@ -116,6 +127,43 @@ def test_new_member_does_not_get_backlog():
 
 def test_room_natural_sort():
     assert sorted(["A4.10", "A4.2", "A4.1"], key=room_key) == ["A4.1", "A4.2", "A4.10"]
+
+
+def test_display_points_thirds():
+    third = Fraction(1, 3)
+    # Equal remainders: the one chosen later (3 is after 1 in the queue) gets the point.
+    assert display_points({1: third, 2: -2 * third, 3: third}, queue=[2, 1, 3]) == {
+        1: 33,
+        2: -67,
+        3: 34,
+    }
+
+
+def test_display_points_equal_scores_follow_the_queue():
+    # 15 riders, one drove: 14 people at -1/15 (-6.67 points), the driver at 14/15.
+    scores = {uid: Fraction(-1, 15) for uid in range(1, 15)} | {15: Fraction(14, 15)}
+    queue = list(range(1, 16))
+    points = display_points(scores, queue)
+    assert sum(points.values()) == 0
+    # Equal remainders everywhere: the extra points go to the end of the queue first.
+    assert points[15] == 94
+    shown = [points[uid] for uid in queue[:-1]]
+    assert shown == sorted(shown) and set(shown) == {-7, -6}
+
+
+def test_display_points_sum_to_zero_and_stay_close():
+    members = people(15)
+    balances, _, _ = run(members, 200)
+    scores = {uid: b.score for uid, b in balances.items()}
+    assert sum(scores.values()) == 0
+    points = display_points(scores)
+    assert sum(points.values()) == 0
+    for uid, score in scores.items():
+        assert abs(points[uid] - score * POINTS_PER_DUTY) < 1
+    # A lower score never shows more points.
+    for a, b in itertools.product(scores, repeat=2):
+        if scores[a] < scores[b]:
+            assert points[a] <= points[b]
 
 
 def test_fewer_people_than_needed():

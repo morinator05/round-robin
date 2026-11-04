@@ -1,27 +1,29 @@
 # Round Robin A4
 
 Web app for the cleaning duties on dorm floor A4: assigns kitchen and trash duty fairly,
-tracks who did it and gives strikes for missed duties. The UI is in German.
+tracks who did it and gives strikes for missed duties. The UI is in English.
 
 ## Rules
 
 **Duties**
-- Küchendienst (kitchen): daily, 2 people, one of them cleans.
-- Mülldienst (trash): weekly (Mon–Sun), 1 person.
-- Whoever cleaned clicks "Erledigt" (only on their own duty, from its first day until the
-  deadline). The other person becomes "nicht nötig".
-- Deadline: 12:00 the day after the duty ends. After that the duty is "verpasst" (missed).
-- Statuses: offen, erledigt, verpasst, nicht nötig, entschuldigt (excused), beanstandet (disputed).
+- Kitchen duty: daily, 2 people, one of them cleans.
+- Trash duty: weekly (Mon–Sun), 1 person.
+- Whoever cleaned clicks "Done" (only on their own duty, from its first day until the
+  deadline). The other person becomes "not needed".
+- Deadline: 12:00 the day after the duty ends. After that the duty is "missed".
+- Statuses: open, done, missed, not needed, excused, disputed.
 
 **Fairness**
 
 This is the fair carpool algorithm (Fagin & Williams, 1983): each kitchen day or trash week
 is a trip, everyone available (active, not away) rides along, and whoever cleans drives.
-Each trip that someone cleaned is split equally among its riders. Score ("Punkte") = duties
+Each trip that someone cleaned is split equally among its riders. Score = duties
 cleaned − shares. The lowest score goes next; ties go to whoever cleaned longest ago (never
 cleaned = first). Being put on a duty without cleaning doesn't move you back.
 Example with 15 residents: a trip takes 1/15 ≈ 0.07 from everyone, the person who cleans
 ends at 1 − 0.07 ≈ +0.93. All scores sum to 0, except for those of residents who moved out.
+The statistics page shows scores as whole points, 100 per duty (+93 and −7 in the example),
+rounded so that they still sum to 0.
 - Away or paused: not riding, so no share for that time.
 - New residents start at 0.
 - Only the person who cleaned gets the point.
@@ -30,24 +32,24 @@ ends at 1 − 0.07 ≈ +0.93. All scores sum to 0, except for those of residents
 - Kitchen and trash are counted separately; penalty weeks not at all.
 
 **Strikes**
-- Given for a missed duty (everyone on it), a disputed "Erledigt", or by hand.
+- Given for a missed duty (everyone on it), a disputed "Done", or by hand.
 - Marking a missed duty done or excusing it later revokes its strikes.
-- 3 strikes → Straf-Mülldienst: the next trash week without an assignment in which the person
+- 3 strikes → penalty trash duty: the next trash week without an assignment in which the person
   isn't away. It replaces the regular trash duty, doesn't count for fairness and uses up the
   3 strikes.
 
-**Absences** ("Abwesenheit", on "Mein Profil"): not picked during that time; open duties in
+**Absences** ("Away", on "My profile"): not picked during that time; open duties in
 it are reassigned immediately. Deleting the absence doesn't give them back.
 
-**Flursprecher (admin)**, on "Verwaltung"
-- Add, edit, pause ("Deaktivieren") and delete ("Löschen (Auszug)") residents; hand over the
-  Flursprecher role.
-- Mark any duty done (also after the deadline), excuse it ("Entschuldigen": no strike, no
-  credit) or dispute it ("Beanstanden", also on "Verlauf": the claimer loses the credit and
+**Floor speaker (admin)**, on "Admin"
+- Add, edit, pause ("Deactivate") and delete ("Delete (moved out)") residents; hand over the
+  floor speaker role.
+- Mark any duty done (also after the deadline), excuse it ("Excuse": no strike, no
+  credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
   gets a strike).
 - Give and revoke strikes; run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
-  The history stays as "ehemalig"; nobody inherits the share.
+  The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `A403`: building, floor, room 01–99.
 
 **Daily job** (00:05 and 12:05): marks missed duties and gives the strikes, then assigns
@@ -58,11 +60,11 @@ deleted) are replaced on their open duties immediately.
 
 | Page | Access | Content |
 |---|---|---|
-| Übersicht | public | Today's duties, plan for the next 14 days. Today's kitchen pair is shown as "Erledigt" / "Ausgelassen": where they land if they clean or don't |
-| Statistik | public | Per resident: done, missed, score ("Punkte"), strikes |
-| Verlauf | login | Duty history, 4 weeks per page |
-| Mein Profil | login | Absences, strikes, recent duties, password |
-| Verwaltung | Flursprecher | Admin functions |
+| Overview | public | Today's duties, plan for the next 14 days. Today's kitchen pair is shown as "Done" / "Skipped": where they land if they clean or don't |
+| Statistics | public | Per resident: done, missed, points (score × 100), strikes |
+| History | login | Duty history, 4 weeks per page |
+| My profile | login | Absences, strikes, recent duties, password |
+| Admin | floor speaker | Admin functions |
 
 ## Settings
 
@@ -80,7 +82,7 @@ In `.env`, see `.env.example`.
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
 | `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first Flursprecher, see below. |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, see below. |
 
 ## Tech stack
 
@@ -98,10 +100,10 @@ In `.env`, see `.env.example`.
 ```bash
 cp .env.example .env                    # set SECRET_KEY: openssl rand -hex 32
 docker compose up -d --build            # database + app, http://localhost:8000
-docker compose exec app uv run --no-dev python scripts/create_admin.py   # first Flursprecher
+docker compose exec app uv run --no-dev python scripts/create_admin.py   # first floor speaker
 ```
 
-- **First Flursprecher without the script:** set the `ADMIN_*` variables in `.env`. The app
+- **First floor speaker without the script:** set the `ADMIN_*` variables in `.env`. The app
   creates the account on startup only while there are no users, so a deleted admin doesn't
   come back.
 - **Server:** set a random `POSTGRES_PASSWORD` before the first start (later changes need
@@ -133,4 +135,4 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 - `app/services/`: the other rules (duties, strikes, users, login, daily job)
 - `app/web.py`: pages and form actions; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
-- `scripts/`: create the first Flursprecher, add test residents
+- `scripts/`: create the first floor speaker, add test residents

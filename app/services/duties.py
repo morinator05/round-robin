@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.formatting import long_date
 from app.models import Duty, PotentialDriver, Rider, Status, Trip, User
 from app.services import carpool, strikes
 from app.services.carpool import Balance, Member, Role
@@ -236,7 +237,7 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
             await strikes.issue(
                 session,
                 user_id=pd.user_id,
-                reason=f"{label} am {pd.trip.start_date:%d.%m.%Y} nicht eingetragen",
+                reason=f"{label} on {long_date(pd.trip.start_date)} not marked as done",
                 auto=True,
                 potential_driver_id=pd.id,
                 today=now.date(),
@@ -261,7 +262,7 @@ async def get_potential_driver(session: AsyncSession, potential_driver_id: int) 
         )
     )
     if pd is None:
-        raise DutyError("Dienst nicht gefunden")
+        raise DutyError("Duty not found")
     return pd
 
 
@@ -269,7 +270,7 @@ def can_mark_as_driver(pd: PotentialDriver, actor: User, now: datetime) -> bool:
     """Whether `actor` may mark `pd` as the trip's driver now.
 
     Residents: only their own open duty, from its first day until the deadline.
-    Flursprecher: any duty at any time, as long as nobody has driven the trip.
+    floor speaker: any duty at any time, as long as nobody has driven the trip.
     """
     # Only one person drives a trip: once somebody drove it, it's closed.
     if any(x.status is Status.drove for x in pd.trip.potential_drivers):
@@ -295,14 +296,14 @@ async def mark_as_driver(
 ) -> None:
     """`pd` drove the trip; the other potential drivers just rode along.
 
-    Also revokes strikes already given for the trip (the Flursprecher may mark it after
+    Also revokes strikes already given for the trip (the floor speaker may mark it after
     the deadline).
 
     Raises:
         DutyError: if `actor` may not mark it (see `can_mark_as_driver`).
     """
     if not can_mark_as_driver(pd, actor, now):
-        raise DutyError("Du kannst diesen Dienst nicht abhaken")
+        raise DutyError("You can't tick off this duty")
     await _revoke_strikes(session, pd, now)
     pd.status = Status.drove
     pd.completed_at = now
@@ -319,10 +320,10 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
     """Admin only: nobody is blamed, but the person gets no drive either.
 
     Raises:
-        DutyError: if `actor` isn't the Flursprecher.
+        DutyError: if `actor` isn't the floor speaker.
     """
     if not actor.is_admin:
-        raise DutyError("Nur der Flursprecher kann Dienste entschuldigen")
+        raise DutyError("Only the floor speaker can excuse duties")
     await _revoke_strikes(session, pd, now)
     pd.status = Status.excused
     pd.completed_at = now
@@ -336,12 +337,12 @@ async def dispute(session: AsyncSession, pd: PotentialDriver, actor: User, now: 
     The driver loses the drive; the others stay "rode" and get nothing.
 
     Raises:
-        DutyError: if `actor` isn't the Flursprecher or `pd` didn't drive.
+        DutyError: if `actor` isn't the floor speaker or `pd` didn't drive.
     """
     if not actor.is_admin:
-        raise DutyError("Nur der Flursprecher kann Dienste beanstanden")
+        raise DutyError("Only the floor speaker can dispute duties")
     if pd.status is not Status.drove:
-        raise DutyError("Nur erledigte Dienste können beanstandet werden")
+        raise DutyError("Only duties marked as done can be disputed")
     pd.status = Status.missed
     pd.disputed_at = now
     await session.flush()
@@ -350,8 +351,8 @@ async def dispute(session: AsyncSession, pd: PotentialDriver, actor: User, now: 
             session,
             user_id=pd.user_id,
             reason=(
-                f"{pd.trip.duty.label} am {pd.trip.start_date:%d.%m.%Y} als erledigt "
-                "eingetragen, aber nicht gemacht"
+                f"{pd.trip.duty.label} on {long_date(pd.trip.start_date)} marked as done "
+                "but not actually done"
             ),
             potential_driver_id=pd.id,
             issued_by_id=actor.id,
