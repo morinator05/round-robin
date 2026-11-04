@@ -226,9 +226,9 @@ td:first-child { white-space: nowrap; }
    on one page line up. */
 th:first-child { width: 12rem; }
 th.end { width: 1%; }
-/* Statistics: all number columns equally wide, headings may take two lines. */
-table.stats { table-layout: fixed; min-width: 46rem; }
-table.stats th { white-space: normal; vertical-align: bottom; }
+/* Statistics: each number column exactly as wide as its one-line heading, all with the
+   same gap; the name column takes the rest. */
+table.stats th:not(:first-child) { width: 1%; }
 /* Muted rows (inactive residents, revoked strikes) keep the normal text size. */
 tr.muted { font-size: inherit; }
 /* Numbers line up on the right, in even-width digits. */
