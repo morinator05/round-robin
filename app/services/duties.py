@@ -52,8 +52,9 @@ def trip_bounds(duty: Duty, day: date) -> tuple[date, date]:
 
 
 def deadline(trip: Trip) -> datetime:
-    """Until when the trip can be marked driven; after that it counts as missed."""
-    day = trip.end_date + timedelta(days=settings.deadline_days_after)
+    """Until when the trip can be marked driven: the deadline hour on the day after it
+    ended. After that it counts as missed."""
+    day = trip.end_date + timedelta(days=1)
     return datetime.combine(day, time(settings.deadline_hour), settings.tz)
 
 
@@ -61,7 +62,7 @@ def choose_at(duty: Duty, day: date) -> datetime:
     """When the potential drivers of the trip containing `day` are chosen.
 
     At the deadline hour of the trip's first day: right after the previous trip's deadline
-    (with the default DEADLINE_DAYS_AFTER=1), so that trip is done or missed by then. That
+    (`deadline`), so that trip is done or missed by then. That
     way only one trip is ever open, and the preview can be exact for each outcome of it.
     """
     start, _ = trip_bounds(duty, day)

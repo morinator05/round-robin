@@ -20,11 +20,10 @@ class Settings(BaseSettings):
     timezone: str = "Europe/Berlin"
     # Optional, shown in the header and page title: "Round Robin <floor_name>".
     floor_name: str = ""
-    # A duty must be marked done by this hour, `deadline_days_after` days after it ended.
-    # Each day's (on Monday also the week's) potential drivers are chosen at this hour too,
-    # right after the previous duty's deadline, so only one duty is ever open at a time.
+    # A duty must be marked done by this hour on the day after it ended. Each day's (on
+    # Monday also the week's) potential drivers are chosen at this hour too, right after the
+    # previous duty's deadline, so only one duty is ever open at a time.
     deadline_hour: int = 8
-    deadline_days_after: int = 1
     # Potential drivers chosen for each trip (day / week); only one of them has to drive.
     kitchen_people_per_day: int = 2
     trash_people_per_week: int = 1
@@ -59,15 +58,6 @@ class Settings(BaseSettings):
         """An hour of the day, 0-23."""
         if not 0 <= value <= 23:
             raise ValueError("DEADLINE_HOUR must be between 0 and 23")
-        return value
-
-    @field_validator("deadline_days_after")
-    @classmethod
-    def deadline_after_duty(cls, value: int) -> int:
-        """At least 1: with 0 the deadline would be when the next duty is chosen, before
-        anyone could mark the duty."""
-        if value < 1:
-            raise ValueError("DEADLINE_DAYS_AFTER must be at least 1")
         return value
 
     @cached_property

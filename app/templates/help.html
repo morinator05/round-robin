@@ -32,10 +32,8 @@
   <h2>Marking a duty as done</h2>
   <p>Once you've cleaned, click <strong>Done</strong> next to your name on the
     <a href="/">overview</a>. Only whoever actually cleaned marks it.</p>
-  <p>Deadline: {{ deadline_hour }}:00
-    {% if deadline_days_after == 1 %}on the day after the duty, so for trash duty the Monday after your week.
-    {% else %}{{ deadline_days_after }} days after the duty.{% endif %}
-    After that the duty counts as missed.</p>
+  <p>Deadline: {{ deadline_hour }}:00 on the day after the duty, so for trash duty the
+    Monday after your week. After that the duty counts as missed.</p>
 </section>
 
 <section class="card help" id="status">

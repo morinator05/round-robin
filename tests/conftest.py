@@ -9,7 +9,6 @@ os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-0123456
 os.environ.update(
     TIMEZONE="Europe/Berlin",
     DEADLINE_HOUR="8",
-    DEADLINE_DAYS_AFTER="1",
     KITCHEN_PEOPLE_PER_DAY="2",
     TRASH_PEOPLE_PER_WEEK="1",
     STRIKE_THRESHOLD="3",

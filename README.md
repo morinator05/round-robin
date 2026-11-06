@@ -100,8 +100,7 @@ In `.env`, see `.env.example`.
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
 | `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
-| `DEADLINE_HOUR` | `8` | Deadline hour …; the next people are chosen right after it. |
-| `DEADLINE_DAYS_AFTER` | `1` | … this many days after the duty ends. |
+| `DEADLINE_HOUR` | `8` | Deadline hour on the day after a duty; the next people are chosen right after it. |
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
 | `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |

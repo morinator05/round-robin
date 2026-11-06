@@ -479,7 +479,6 @@ async def help_page(request: Request, user: CurrentUser):
         kitchen_people=settings.kitchen_people_per_day,
         trash_people=settings.trash_people_per_week,
         deadline_hour=settings.deadline_hour,
-        deadline_days_after=settings.deadline_days_after,
         preview_days=settings.preview_days,
     )
 
