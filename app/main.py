@@ -17,7 +17,7 @@ from app.db import SessionLocal
 from app.deps import LoginRequired
 from app.services import users
 from app.services.jobs import scheduled_tick
-from app.web import router
+from app.web import public, router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -47,7 +47,14 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title=f"Round Robin {settings.floor_name}".strip(), lifespan=lifespan)
+# No /docs, /redoc or /openapi.json: they would list every route to anyone on the network.
+app = FastAPI(
+    title=f"Round Robin {settings.floor_name}".strip(),
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -76,7 +83,18 @@ async def refuse_cross_site_posts(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def no_caching_of_pages(request: Request, call_next):
+    """Pages hold personal data: the browser must not keep them, e.g. for Back after
+    logging out on a shared computer. Static files have nothing personal."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.include_router(public)
 app.include_router(router)
 
 

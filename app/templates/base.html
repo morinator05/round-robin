@@ -6,6 +6,9 @@
   <title>{% block title %}Round Robin{% if floor_name %} {{ floor_name }}{% endif %}{% endblock %}</title>
   <link rel="preload" href="/static/fonts/overpass-latin-wght.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
+  {# htmx would otherwise keep the last pages in localStorage for Back, also after logging
+     out. Without the cache, Back loads the page from the server, which asks for a login. #}
+  <meta name="htmx-config" content='{"historyCacheSize":0,"refreshOnHistoryMiss":true}'>
   <script src="/static/htmx.min.js" defer></script>
 </head>
 <body hx-boost="true">
@@ -13,24 +16,21 @@
   {% macro nav_link(href, label) %}<a href="{{ href }}"{% if path == href or (href != "/" and path.startswith(href ~ "/")) %} aria-current="page"{% endif %}>{{ label }}</a>{% endmacro %}
   <nav>
     <a class="brand" href="/">Round Robin{% if floor_name %} <span class="brand-floor">{{ floor_name }}</span>{% endif %}</a>
+    {# Logged out, only the login page can be seen, so there is nothing to link to. #}
+    {% if user %}
     <div class="nav-links">
       {{ nav_link("/", "Overview") }}
       {{ nav_link("/stats", "Statistics") }}
-      {% if user %}
-        {{ nav_link("/history", "History") }}
-        {{ nav_link("/me", "My profile") }}
-        {% if user.is_admin %}{{ nav_link("/admin", "Admin") }}{% endif %}
-      {% endif %}
+      {{ nav_link("/history", "History") }}
+      {{ nav_link("/me", "My profile") }}
+      {% if user.is_admin %}{{ nav_link("/admin", "Admin") }}{% endif %}
       {{ nav_link("/help", "How it works") }}
     </div>
     <div class="nav-user">
-      {% if user %}
-        <span class="muted">Logged in as</span> {{ person(user) }}
-        <form method="post" action="/logout"><button class="link">Log out</button></form>
-      {% else %}
-        {{ nav_link("/login", "Log in") }}
-      {% endif %}
+      <span class="muted">Logged in as</span> {{ person(user) }}
+      <form method="post" action="/logout"><button class="link">Log out</button></form>
     </div>
+    {% endif %}
   </nav>
   <main>
     {% for kind, msg in messages %}<div class="flash {{ kind }}" role="status">{{ msg }}</div>{% endfor %}

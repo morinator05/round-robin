@@ -10,13 +10,14 @@ from fractions import Fraction
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.routing import Route
 
 from app import web
 from app.config import settings
 from app.main import app
-from app.models import Duty, PotentialDriver, Status, Trip
+from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import duties, jobs, strikes, users
 from app.services.duties import DutyError
 from app.services.login_throttle import LoginThrottle
@@ -356,6 +357,9 @@ async def test_dashboard_before_the_deadline_hour_shows_yesterday(session, clien
     tuesday = MONDAY + timedelta(days=1)
     await jobs.daily_tick(session, at(MONDAY, hour))
     await session.commit()
+    kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
+    on_duty = {pd.user_id for pd in kitchen.potential_drivers}
+    await login(client, next(p for p in people if p.id not in on_duty).username)
     monkeypatch.setattr(type(settings), "now", lambda self: at(tuesday, hour - 1))
     text = (await client.get("/")).text
     card = text[
@@ -491,10 +495,10 @@ async def test_web_permissions(session, client):
     await make_users(session, n=3)
     r = await client.get("/me")
     assert r.status_code == 303 and r.headers["location"].startswith("/login")
-    r = await client.get("/")
-    assert r.status_code == 200 and "Kitchen duty" in r.text
 
     await login(client, "p2")
+    r = await client.get("/")
+    assert r.status_code == 200 and "Kitchen duty" in r.text
     assert (await client.get("/admin")).status_code == 403
     assert (await client.get("/me")).status_code == 200
 
@@ -509,6 +513,10 @@ async def test_web_permissions(session, client):
     assert "Neu" in (await client.get("/admin")).text
 
 
+# Reachable without login. Everything else must send you to the login page.
+PUBLIC_ROUTES = {("GET", "/login"), ("POST", "/login"), ("POST", "/logout")}
+
+
 def assert_no_personal_data(text: str, people) -> None:
     """None of the residents' names, usernames or rooms appear in `text`."""
     for p in people:
@@ -516,11 +524,142 @@ def assert_no_personal_data(text: str, people) -> None:
             assert value not in text, f"{value!r} visible without login"
 
 
+def all_routes(routes):
+    """`routes` with included routers expanded: FastAPI keeps those as one wrapper each."""
+    for route in routes:
+        if (sub := getattr(route, "original_router", None)) is not None:
+            yield from all_routes(sub.routes)
+        else:
+            yield route
+
+
+async def row_counts(session) -> dict:
+    """How many rows each table has, and potential drivers per status."""
+    counts = {
+        model.__name__: await session.scalar(select(func.count()).select_from(model))
+        for model in (User, AwayPeriod, Strike, Trip, PotentialDriver)
+    }
+    statuses = await session.execute(
+        select(PotentialDriver.status, func.count()).group_by(PotentialDriver.status)
+    )
+    return counts | {status: n for status, n in statuses.all()}
+
+
 def assert_sent_to_login(r: httpx.Response, path: str, people) -> None:
     """`r` redirects to the login page (coming back to `path`) and shows nothing personal."""
     assert r.status_code == 303, f"{r.request.method} {path}: {r.status_code}, not a redirect"
     assert r.headers["location"] == f"/login?next={path}"
     assert_no_personal_data(r.text, people)
+
+
+async def test_every_page_needs_a_login(session, client):
+    """Every route except the login itself redirects to the login page without a session.
+
+    Goes through `app.routes`, so routes added later are checked too. A route with a path
+    parameter this test doesn't know yet fails here: add an id for it to `ids`. The POSTs
+    also must not change anything.
+    """
+    people = await make_users(session, n=4)
+    _, first, _, _, _ = await kitchen_pair(session, people, settings.today())
+    later = settings.today() + timedelta(days=30)
+    await users.add_away(session, people[1], later, later + timedelta(days=1), settings.today())
+    away = await session.scalar(select(AwayPeriod))
+    strike = await strikes.issue(session, user_id=people[2].id, reason="x", today=MONDAY)
+    await session.commit()
+    ids = {
+        "user_id": people[1].id,
+        "potential_driver_id": first.id,
+        "away_id": away.id,
+        "strike_id": strike.id,
+    }
+
+    before = await row_counts(session)
+
+    checked = set()
+    for route in all_routes(app.routes):
+        if not isinstance(route, Route):  # e.g. the /static mount
+            continue
+        unknown = set(route.param_convertors) - set(ids)
+        assert not unknown, f"{route.path}: add an id for {unknown} to this test"
+        path = route.path.format(**ids)
+        for method in sorted(route.methods - {"HEAD"}):
+            if (method, route.path) in PUBLIC_ROUTES:
+                continue
+            for headers in ({}, {"HX-Request": "true"}):
+                r = await client.request(method, path, headers=headers)
+                assert_sent_to_login(r, path, people)
+            checked.add((method, route.path))
+    # All of the app's own routes were reached, not just FastAPI's.
+    own = {
+        (method, route.path) for route in web.router.routes for method in route.methods - {"HEAD"}
+    }
+    assert own - PUBLIC_ROUTES <= checked
+    # The pages that used to be public are among them.
+    assert {("GET", "/"), ("GET", "/stats"), ("GET", "/help")} <= checked
+    session.expire_all()
+    assert await row_counts(session) == before
+
+
+async def test_pages_with_query_strings_need_a_login(session, client):
+    people = await make_users(session, n=4)
+    await kitchen_pair(session, people, settings.today())
+    for url in (f"/?cleaner={people[1].id}", "/history?until=2026-11-01"):
+        r = await client.get(url)
+        assert_sent_to_login(r, url.split("?")[0], people)
+
+
+async def test_api_docs_are_off(session, client):
+    for path in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"):
+        assert (await client.get(path)).status_code == 404, path
+
+
+def page_links(text: str) -> set[str]:
+    """Where the page's links point to, without stylesheets and fonts."""
+    return {h for h in re.findall(r'href="([^"]*)"', text) if not h.startswith("/static/")}
+
+
+async def test_login_page_shows_nothing_personal(session, client, monkeypatch):
+    monkeypatch.setattr("app.web.login_throttle", LoginThrottle())
+    people = await make_users(session, n=4)
+    await kitchen_pair(session, people, settings.today())
+    r = await client.get("/login")
+    assert r.status_code == 200 and 'name="password"' in r.text
+    assert_no_personal_data(r.text, people)
+    # No links to the other pages either, they'd only lead back here. Just the brand ("/").
+    assert page_links(r.text) <= {"/", "/login"}
+
+    # Not after a failed login either.
+    r = await client.post("/login", data={"username": "p2", "password": "wrong"})
+    r = await client.get(r.headers["location"])
+    assert "Wrong username or password" in r.text
+    assert_no_personal_data(r.text, people)
+
+
+async def test_pages_are_not_kept_after_logout(session, client):
+    """After logging out, Back must not show personal pages from the browser's cache.
+
+    htmx keeps the last pages in localStorage (for Back) unless told not to, and browsers
+    keep pages in their cache unless the response says `no-store`.
+    """
+    await make_users(session, n=3)
+    await login(client, "p1")
+    for path in ("/", "/stats", "/history", "/me", "/admin", "/help"):
+        r = await client.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-store", path
+        assert '"historyCacheSize":0' in r.text and '"refreshOnHistoryMiss":true' in r.text
+    # Redirects and the login page too, they can carry flash messages.
+    assert (await client.post("/logout")).headers["cache-control"] == "no-store"
+    assert (await client.get("/login")).headers["cache-control"] == "no-store"
+    # Static files have nothing personal and may be cached.
+    assert "no-store" not in (await client.get("/static/style.css")).headers.get(
+        "cache-control", ""
+    )
+
+
+async def test_static_files_are_public(session, client):
+    # The login page needs them.
+    assert (await client.get("/static/style.css")).status_code == 200
+    assert (await client.get("/static/htmx.min.js")).status_code == 200
 
 
 async def test_session_of_a_deleted_user_is_no_login(session, client):
@@ -581,12 +720,10 @@ async def test_forged_session_cookie_is_no_login(session, client):
 
 async def test_help_page(session, client):
     await make_users(session, n=3)
+    await login(client, "p2")
     r = await client.get("/help")
     assert r.status_code == 200 and "Kitchen duty" in r.text
     assert "For the floor speaker" not in r.text
-
-    await login(client, "p2")
-    assert "For the floor speaker" not in (await client.get("/help")).text
     await client.post("/logout")
     await login(client, "p1")
     assert "For the floor speaker" in (await client.get("/help")).text
@@ -874,6 +1011,7 @@ async def test_stats_shows_whole_points(session, client):
     _, first, _, p1, _ = await kitchen_pair(session, people)
     await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
     await session.commit()
+    await login(client, "p1")
     text = (await client.get("/stats")).text
     cells = re.findall(r'<td class="points">([^<]*)</td>', text)
     kitchen = [int(c.replace("\u2212", "-")) for c in cells[::2]]
@@ -889,12 +1027,15 @@ async def test_dashboard_switches_between_plans(session, client):
     def current(text):
         return re.findall(r'cleaner=(\d+)"[^>]*\n?[^>]*aria-current="true"', text)
 
+    # Not on the duty yourself, the first one's plan is the default.
+    await login(client, next(p for p in people if p.id not in {p1.id, p2.id}).username)
     text = (await client.get("/")).text
     assert "The plan depends on who cleans today" in text
     assert current(text) == [str(p1.id)]
     text = (await client.get(f"/?cleaner={p2.id}")).text
     assert current(text) == [str(p2.id)]
     # Unknown ids fall back to the default; logged in as one of the pair, that's yourself.
+    await client.post("/logout")
     await login(client, p2.username)
     assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
     assert "If you clean" in (await client.get("/")).text
@@ -912,6 +1053,7 @@ async def test_switching_plans_shows_different_tables(session, client):
         start = text.index('id="kitchen-preview"')
         return text[start : text.index("</section>", start)]
 
+    await login(client, "p3")
     headers = {"HX-Request": "true"}
     one = (await client.get(f"/?cleaner={p1.id}", headers=headers)).text
     two = (await client.get(f"/?cleaner={p2.id}", headers=headers)).text
@@ -953,6 +1095,7 @@ async def test_dashboard_without_preview_days(session, client, monkeypatch):
     await kitchen_pair(session, people, settings.today())
     await session.commit()
     monkeypatch.setattr(settings, "preview_days", 0)
+    await login(client, "p1")
     assert (await client.get("/")).status_code == 200
 
 
@@ -962,6 +1105,7 @@ async def test_stats_colour_strikes(session, client):
     for _ in range(2):
         await strikes.issue(session, user_id=people[2].id, reason="x", today=MONDAY)
     await session.commit()
+    await login(client, "p1")
     text = (await client.get("/stats")).text
     assert '"strikes ok">0 / 3' in text
     assert '"strikes warn">1 / 3' in text
