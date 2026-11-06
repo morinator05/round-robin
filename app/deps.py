@@ -5,6 +5,7 @@ FastAPI resolves these per request, similar to constructor injection. A route pa
 before the route body runs.
 """
 
+import hmac
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
@@ -21,13 +22,24 @@ class LoginRequired(Exception):
 
 
 async def optional_user(request: Request, session: Session) -> User | None:
-    """The logged-in user, or None. A session of a since deleted user is cleared."""
+    """The logged-in user, or None.
+
+    The session must name an existing user and carry their current `session_token`;
+    otherwise (user deleted, logged out elsewhere, password changed, database reset) it
+    is cleared.
+    """
     user_id = request.session.get("user_id")
     if user_id is None:
         return None
     user = await session.get(User, user_id)
-    if user is None:
+    token = request.session.get("token")
+    if (
+        user is None
+        or not isinstance(token, str)
+        or not hmac.compare_digest(token, user.session_token)
+    ):
         request.session.clear()
+        return None
     return user
 
 

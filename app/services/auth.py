@@ -5,7 +5,7 @@ from pwdlib import PasswordHash
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import User
+from app.models import User, new_session_token
 
 MIN_PASSWORD_LENGTH = 8
 PASSWORD_TOO_SHORT = f"The password must have at least {MIN_PASSWORD_LENGTH} characters"
@@ -31,6 +31,11 @@ async def verify_password_off_loop(password: str, password_hash: str) -> bool:
     """`verify_password` in a worker thread. A check takes ~75 ms of CPU; on the event loop
     a few guesses per second would stall every other request."""
     return await to_thread.run_sync(verify_password, password, password_hash)
+
+
+def end_sessions(user: User) -> None:
+    """Log `user` out on every device: their existing session cookies stop working."""
+    user.session_token = new_session_token()
 
 
 async def authenticate(session: AsyncSession, username: str, password: str) -> User | None:

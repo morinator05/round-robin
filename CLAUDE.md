@@ -90,7 +90,9 @@ current/upcoming trips and chooses replacements.
   personal data may be visible without a login (`test_every_page_needs_a_login`).
 - `app/deps.py`: `Session`, `OptionalUser`, `CurrentUser`, `AdminUser` are `Annotated`
   route parameter types; `CurrentUser` raises `LoginRequired`, which `main.py` turns into a
-  redirect to `/login`.
+  redirect to `/login`. A session counts only if it carries the user's current
+  `User.session_token`; `auth.end_sessions` (logout, password changes) sets a new one and so
+  logs the user out everywhere. Log in with `web.start_session`.
 - `app/formatting.py`: how dates are written (`short_date` "3 Nov", `long_date`
   "3 Nov 2026"), for templates and strike reasons.
 - `app/config.py`: settings from `.env`. Use `settings.now()` / `settings.today()` (in the

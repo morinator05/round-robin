@@ -102,6 +102,12 @@ def render(request: Request, name: str, user: User | None, **ctx) -> HTMLRespons
     )
 
 
+def start_session(request: Request, user: User) -> None:
+    """Log `user` in, in this browser."""
+    request.session["user_id"] = user.id
+    request.session["token"] = user.session_token
+
+
 def redirect(url: str) -> RedirectResponse:
     """Redirect after a form POST; 303 makes the browser follow it with a GET."""
     return RedirectResponse(url, status_code=303)
@@ -185,13 +191,16 @@ async def login(
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
-    request.session["user_id"] = user.id
+    start_session(request, user)
     return redirect(safe_next(next))
 
 
 @public.post("/logout")
-async def logout(request: Request):
-    """Log out."""
+async def logout(request: Request, session: Session, user: OptionalUser):
+    """Log out, on all devices. Only with a valid session: an outdated cookie ends nothing."""
+    if user:
+        auth.end_sessions(user)
+        await session.commit()
     request.session.clear()
     return redirect("/")
 
@@ -363,8 +372,11 @@ async def change_password(
         if len(new_password) < auth.MIN_PASSWORD_LENGTH:
             flash(request, auth.PASSWORD_TOO_SHORT, "error")
         else:
+            # Logs out the other devices; this browser stays logged in.
             user.password_hash = auth.hash_password(new_password)
+            auth.end_sessions(user)
             await session.commit()
+            start_session(request, user)
             flash(request, "Password changed")
     return redirect("/me")
 
@@ -549,8 +561,12 @@ async def admin_edit_user(
     if target.id != user.id:
         target.is_admin = is_admin
     if password:
+        # Whoever knew the old password (or has a session) is logged out.
         target.password_hash = auth.hash_password(password)
+        auth.end_sessions(target)
     await session.commit()
+    if target.id == user.id:
+        start_session(request, user)  # your own new password: stay logged in here
     flash(request, f"{target.display_name} saved")
     return redirect("/admin")
 
