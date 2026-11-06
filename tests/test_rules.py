@@ -1,5 +1,8 @@
 """Rules against a real database: assigning, deadlines, strikes, moving out, web pages."""
 
+import asyncio
+import base64
+import json
 import random
 import re
 from datetime import date, datetime, time, timedelta
@@ -8,7 +11,9 @@ from fractions import Fraction
 import httpx
 import pytest
 from sqlalchemy import select
+from starlette.middleware.sessions import SessionMiddleware
 
+from app import web
 from app.config import settings
 from app.main import app
 from app.models import Duty, PotentialDriver, Status, Trip
@@ -504,6 +509,76 @@ async def test_web_permissions(session, client):
     assert "Neu" in (await client.get("/admin")).text
 
 
+def assert_no_personal_data(text: str, people) -> None:
+    """None of the residents' names, usernames or rooms appear in `text`."""
+    for p in people:
+        for value in (p.name, p.first_name, p.room_number, p.username):
+            assert value not in text, f"{value!r} visible without login"
+
+
+def assert_sent_to_login(r: httpx.Response, path: str, people) -> None:
+    """`r` redirects to the login page (coming back to `path`) and shows nothing personal."""
+    assert r.status_code == 303, f"{r.request.method} {path}: {r.status_code}, not a redirect"
+    assert r.headers["location"] == f"/login?next={path}"
+    assert_no_personal_data(r.text, people)
+
+
+async def test_session_of_a_deleted_user_is_no_login(session, client):
+    people = await make_users(session, n=4)
+    await login(client, "p3")
+    assert (await client.get("/me")).status_code == 200
+    await users.delete(session, people[2], settings.today())
+    await session.commit()
+    assert_sent_to_login(await client.get("/me"), "/me", people[:2] + people[3:])
+    # The stale session was cleared.
+    assert "a4_session" not in client.cookies
+
+
+async def test_logged_out_session_is_no_login(session, client):
+    people = await make_users(session, n=4)
+    await login(client, "p2")
+    assert (await client.get("/me")).status_code == 200
+    await client.post("/logout")
+    assert_sent_to_login(await client.get("/me"), "/me", people)
+
+
+def session_payload(data: dict) -> bytes:
+    """Session data the way Starlette's `SessionMiddleware` puts it into the cookie."""
+    return base64.b64encode(json.dumps(data).encode())
+
+
+def set_session_cookie(client, value: str) -> None:
+    """Replace the session cookie (not add a second one next to it)."""
+    client.cookies.clear()
+    client.cookies.set("a4_session", value)
+
+
+async def test_forged_session_cookie_is_no_login(session, client):
+    people = await make_users(session, n=4)
+    admin = people[0]
+
+    def signed_with(key: str) -> str:
+        middleware = SessionMiddleware(app=None, secret_key=key)
+        return middleware.signer.sign(session_payload({"user_id": admin.id})).decode()
+
+    # Control: built like this with the app's key, the cookie is a login. So the cases
+    # below fail because of the key or the signature, not because the cookie is malformed.
+    set_session_cookie(client, signed_with(settings.secret_key))
+    assert (await client.get("/admin")).status_code == 200
+
+    # Signed with another key.
+    set_session_cookie(client, signed_with("x" * 32))
+    assert_sent_to_login(await client.get("/admin"), "/admin", people)
+
+    # A real login with the user id swapped for the floor speaker's: the signature no
+    # longer matches.
+    client.cookies.clear()
+    await login(client, "p2")
+    _, signature = client.cookies["a4_session"].split(".", 1)
+    set_session_cookie(client, f"{session_payload({'user_id': admin.id}).decode()}.{signature}")
+    assert_sent_to_login(await client.get("/admin"), "/admin", people)
+
+
 async def test_help_page(session, client):
     await make_users(session, n=3)
     r = await client.get("/help")
@@ -604,6 +679,101 @@ async def test_login_is_blocked_after_too_many_failures(session, client, monkeyp
     # Other users can still log in.
     await login(client, "p1")
     assert (await client.get("/me")).status_code == 200
+
+
+async def test_concurrent_logins_cannot_get_past_the_limit(session, client, monkeypatch):
+    """Many guesses at once: each counts before its password check, not after it."""
+    monkeypatch.setattr("app.web.login_throttle", LoginThrottle(max_failures=3))
+    await make_users(session, n=2)
+    checked = 0
+    authenticate = web.auth.authenticate
+
+    async def counting_authenticate(*args):
+        nonlocal checked
+        checked += 1
+        await asyncio.sleep(0.01)  # like the real check, let the other requests run meanwhile
+        return await authenticate(*args)
+
+    monkeypatch.setattr(web.auth, "authenticate", counting_authenticate)
+    data = {"username": "p2", "password": "wrong"}
+    await asyncio.gather(*(client.post("/login", data=data) for _ in range(20)))
+    assert checked == 3
+
+
+async def test_guessing_the_old_password_is_limited(session, client, monkeypatch):
+    """Someone with a session (an unlocked phone) can't find out the password by trying."""
+    monkeypatch.setattr("app.web.login_throttle", LoginThrottle(max_failures=3))
+    await make_users(session, n=2)
+    await login(client, "p2")
+
+    async def change(old: str) -> str:
+        data = {"old_password": old, "new_password": "new-secret-1"}
+        r = await client.post("/me/password", data=data)
+        return (await client.get(r.headers["location"])).text
+
+    for _ in range(3):
+        assert "Old password is wrong" in await change("wrong")
+    # Even the right one is refused while blocked.
+    assert "Too many failed attempts" in await change("secret123")
+    await client.post("/logout")
+    await login(client, "p2")  # the password didn't change
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "http://evil.example"},
+        {"Origin": "http://test:8080"},  # another port is another site
+        {"Origin": "null"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Sec-Fetch-Site": "same-site"},  # e.g. another app on a sibling subdomain
+    ],
+)
+async def test_posts_from_other_sites_are_refused(session, client, headers):
+    """A page elsewhere can't make a logged-in floor speaker's browser change anything."""
+    people = await make_users(session, n=3)
+    await login(client, "p1")
+    target = people[2]
+    r = await client.post(
+        f"/admin/users/{target.id}/edit",
+        data={"name": "Hacked", "room_number": target.room_number, "is_admin": "true"},
+        headers=headers,
+    )
+    assert r.status_code == 403
+    await session.refresh(target)
+    assert target.name == "Person 3" and not target.is_admin
+    # Logging in from another site (login CSRF) is refused too.
+    r = await client.post(
+        "/login", data={"username": "p2", "password": "secret123"}, headers=headers
+    )
+    assert r.status_code == 403
+
+
+async def test_posts_from_this_site_are_accepted(session, client):
+    people = await make_users(session, n=3)
+    await login(client, "p1")
+    for headers in (
+        {"Origin": "http://test", "Sec-Fetch-Site": "same-origin"},
+        {"Sec-Fetch-Site": "none"},  # typed into the address bar / a bookmark
+        {},  # old browsers and scripts send neither
+    ):
+        r = await client.post(
+            f"/admin/users/{people[2].id}/edit",
+            data={"name": "Renamed", "room_number": "E103"},
+            headers=headers,
+        )
+        assert r.status_code == 303 and r.headers["location"] == "/admin", headers
+
+
+@pytest.mark.parametrize(
+    "url", ["//evil.com", "/\\evil.com", "/\t/evil.com", "\\\\evil.com", "/a\r\nX: y", "http://x"]
+)
+def test_next_never_leaves_the_site(url):
+    assert web.safe_next(url) == "/"
+
+
+def test_next_keeps_paths_on_this_site():
+    assert web.safe_next("/history?until=2026-11-01") == "/history?until=2026-11-01"
 
 
 async def test_short_passwords_are_rejected(session):

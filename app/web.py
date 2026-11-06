@@ -104,8 +104,18 @@ def redirect(url: str) -> RedirectResponse:
 
 
 def safe_next(url: str | None) -> str:
-    """`url` if it's a path on this site, else "/". Stops redirects to other sites."""
-    if url and url.startswith("/") and not url.startswith("//"):
+    """`url` if it's a path on this site, else "/". Stops redirects to other sites.
+
+    Browsers read `\\` like `/` and skip tabs and line breaks, so `/\\evil.com` would
+    leave the site too.
+    """
+    if (
+        url
+        and url.startswith("/")
+        and not url.startswith("//")
+        and "\\" not in url
+        and url.isprintable()
+    ):
         return url
     return "/"
 
@@ -162,13 +172,12 @@ async def login(
     """Log in. Too many failed attempts block the username from that IP for a while."""
     client_ip = request.client.host if request.client else "unknown"
     throttle_key = f"{username.strip().lower()}@{client_ip}"
-    if login_throttle.is_blocked(throttle_key):
-        flash(request, "Too many failed attempts, please try again in 15 minutes", "error")
+    if not login_throttle.try_attempt(throttle_key):
+        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
         return redirect(f"/login?next={safe_next(next)}")
 
     user = await auth.authenticate(session, username, password)
     if user is None:
-        login_throttle.record_failure(throttle_key)
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
@@ -337,15 +346,22 @@ async def change_password(
     old_password: Annotated[str, Form()],
     new_password: Annotated[str, Form()],
 ):
-    """Change your own password."""
-    if not auth.verify_password(old_password, user.password_hash):
+    """Change your own password. Wrong old passwords are limited like logins."""
+    throttle_key = f"password-change:{user.id}"
+    if not login_throttle.try_attempt(throttle_key):
+        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
+    elif not await auth.verify_password_off_loop(old_password, user.password_hash):
         flash(request, "Old password is wrong", "error")
-    elif len(new_password) < auth.MIN_PASSWORD_LENGTH:
-        flash(request, auth.PASSWORD_TOO_SHORT, "error")
     else:
-        user.password_hash = auth.hash_password(new_password)
-        await session.commit()
-        flash(request, "Password changed")
+        # The old password was right, so the attempt doesn't count, even if the new one
+        # is too short.
+        login_throttle.reset(throttle_key)
+        if len(new_password) < auth.MIN_PASSWORD_LENGTH:
+            flash(request, auth.PASSWORD_TOO_SHORT, "error")
+        else:
+            user.password_hash = auth.hash_password(new_password)
+            await session.commit()
+            flash(request, "Password changed")
     return redirect("/me")
 
 
