@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Floor speaker – {{ super() }}{% endblock %}
 {% block content %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 
@@ -53,9 +54,11 @@
 
 <section class="card">
   <h2>Strikes</h2>
-  <form method="post" action="/admin/strikes" class="row">
+  <form method="post" action="/admin/strikes" class="row"
+        hx-confirm="Give this strike? With {{ strike_threshold }} active strikes a penalty week follows right away.">
     <label>Resident
       <select name="user_id" required>
+        <option value="">Choose resident…</option>
         {% for u in users %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
       </select>
     </label>
@@ -72,8 +75,8 @@
         <td>{{ "automatic" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
         <td class="end">
           {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
-          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">served</span>
           {% else %}
+            {% if s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>{% endif %}
             <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline">
               <button class="secondary">Revoke</button>
             </form>

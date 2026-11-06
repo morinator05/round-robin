@@ -296,4 +296,6 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.history .col-action { width: 7.5rem; }
   table.history td:first-child { white-space: normal; }
   .card .table-wrap table { min-width: 36rem; }
+  /* The help page's two-column tables wrap instead of scrolling sideways. */
+  .card.help .table-wrap table { min-width: 0; }
 }

@@ -7,7 +7,6 @@ on (`duties.choose_at`), right after the previous duty's deadline.
 import logging
 from datetime import datetime
 
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,9 +15,6 @@ from app.models import Duty
 from app.services import duties
 
 log = logging.getLogger(__name__)
-
-# Arbitrary, app-wide id for the Postgres advisory lock that serializes ticks.
-DAILY_TICK_LOCK_ID = 4004
 
 
 async def daily_tick(session: AsyncSession, now: datetime) -> None:
@@ -30,7 +26,7 @@ async def daily_tick(session: AsyncSession, now: datetime) -> None:
     trips are missing.
     """
     # Serialize ticks (scheduler, startup and page loads may race).
-    await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DAILY_TICK_LOCK_ID})
+    await duties.lock_trips(session)
     missed = await duties.process_overdue(session, now)
     for duty in Duty:
         if now >= duties.choose_at(duty, now.date()):

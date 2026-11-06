@@ -12,6 +12,7 @@ from fractions import Fraction
 import httpx
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.routing import Route
 
@@ -129,6 +130,9 @@ async def kitchen_pair(session, people, day=MONDAY):
     first, second = [
         await duties.get_potential_driver(session, pd.id) for pd in kitchen.potential_drivers
     ]
+    # `get_potential_driver` locks the trip's rows until the transaction ends; requests
+    # through the app (another session) would wait for them.
+    await session.commit()
     return kitchen, first, second, by_id[first.user_id], by_id[second.user_id]
 
 
@@ -282,7 +286,7 @@ async def history(session, people, days: int, seed: int) -> date:
         if i == 2:
             await users.add_away(session, people[5], day, day + timedelta(days=3), day)
         if i == 4:
-            await users.delete(session, people[9], day)
+            await users.delete(session, people[9], at(day, 12))
         await session.commit()
         trip = await duties.get_trip(session, Duty.kitchen, day)
         pending = [pd for pd in trip.potential_drivers if pd.status is Status.pending]
@@ -443,7 +447,7 @@ async def test_delete_user_keeps_history_and_replaces(session):
     trash = await duties.get_trip(session, Duty.trash, MONDAY)
     gone_id = trash.potential_drivers[0].user_id
     gone = next(p for p in people if p.id == gone_id)
-    await users.delete(session, gone, MONDAY)
+    await users.delete(session, gone, at(MONDAY, 12))
     await session.commit()
     trash = await duties.get_trip(session, Duty.trash, MONDAY)
     assert [pd.user_id for pd in trash.potential_drivers] != [gone_id]
@@ -552,9 +556,18 @@ async def row_counts(session) -> dict:
 
 
 def assert_sent_to_login(r: httpx.Response, path: str, people) -> None:
-    """`r` redirects to the login page (coming back to `path`) and shows nothing personal."""
-    assert r.status_code == 303, f"{r.request.method} {path}: {r.status_code}, not a redirect"
-    assert r.headers["location"] == f"/login?next={path}"
+    """`r` sends the browser to the login page and shows nothing personal.
+
+    Pages (GET) are come back to after logging in; after a form POST that would be a GET
+    of a POST-only route, so it goes to the dashboard. htmx requests get `HX-Redirect`.
+    """
+    back = path if r.request.method == "GET" else "/"
+    if r.request.headers.get("HX-Request"):
+        assert r.status_code == 200, f"{r.request.method} {path}: {r.status_code}"
+        assert r.headers["hx-redirect"] == f"/login?next={back}"
+    else:
+        assert r.status_code == 303, f"{r.request.method} {path}: {r.status_code}, not a redirect"
+        assert r.headers["location"] == f"/login?next={back}"
     assert_no_personal_data(r.text, people)
 
 
@@ -611,7 +624,9 @@ async def test_pages_with_query_strings_need_a_login(session, client):
     await kitchen_pair(session, people, settings.today())
     for url in (f"/?cleaner={people[1].id}", "/history?until=2026-11-01"):
         r = await client.get(url)
-        assert_sent_to_login(r, url.split("?")[0], people)
+        # After logging in the same page comes back, query string included.
+        query = url.split("?")[1].replace("=", "%3D")
+        assert_sent_to_login(r, f"{url.split('?')[0]}%3F{query}", people)
 
 
 async def test_api_docs_are_off(session, client):
@@ -672,7 +687,7 @@ async def test_session_of_a_deleted_user_is_no_login(session, client):
     people = await make_users(session, n=4)
     await login(client, "p3")
     assert (await client.get("/me")).status_code == 200
-    await users.delete(session, people[2], settings.today())
+    await users.delete(session, people[2], settings.now())
     await session.commit()
     assert_sent_to_login(await client.get("/me"), "/me", people[:2] + people[3:])
     # The stale session was cleared.
@@ -767,7 +782,7 @@ async def test_session_from_an_earlier_database_is_no_login(session, client):
     await login(client, "p2")
     old_cookie = client.cookies["a4_session"]
     old_id = people[1].id
-    await users.delete(session, people[1], settings.today())
+    await users.delete(session, people[1], settings.now())
     await session.commit()
     session.add(
         User(
@@ -917,7 +932,7 @@ async def test_top_up_skips_trip_that_is_already_driven(session):
     newbie = await users.create(
         session, name="Neu", room_number="E120", username="neu", password="secret123"
     )
-    await duties.fill_current(session, MONDAY)
+    await duties.fill_current(session, at(MONDAY, 12))
     await session.commit()
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
     assert [x.user_id for x in kitchen.potential_drivers] == [first.id]
@@ -1109,7 +1124,7 @@ async def test_moving_out_does_not_change_the_others_balance(session):
     staying_ids = [p.id for p in staying]
     before = await duties.load_balances(session, Duty.kitchen)
     # Move out on the last scheduled day, so no new trip changes the balances.
-    await users.delete(session, leaving, day - timedelta(days=1))
+    await users.delete(session, leaving, at(day - timedelta(days=1), 12))
     await session.commit()
     after = await duties.load_balances(session, Duty.kitchen)
     assert [after[uid].score for uid in staying_ids] == [before[uid].score for uid in staying_ids]
@@ -1132,7 +1147,7 @@ async def test_moving_out_drops_open_penalty_week(session):
         await strikes.issue(session, user_id=leaving.id, reason="x", today=MONDAY)
     await session.commit()
 
-    await users.delete(session, leaving, MONDAY)
+    await users.delete(session, leaving, at(MONDAY, 12))
     await session.commit()
     await jobs.daily_tick(session, at(MONDAY + timedelta(days=7)))
     trip = await duties.get_trip(session, Duty.trash, MONDAY + timedelta(days=7))
@@ -1252,3 +1267,217 @@ async def test_stats_colour_strikes(session, client):
     assert '"strikes ok">0 / 3' in text
     assert '"strikes warn">1 / 3' in text
     assert '"strikes bad">2 / 3' in text
+
+
+# --- Fixes from the review ----------------------------------------------------------
+
+
+async def penalty_trips(session) -> list[Trip]:
+    """All penalty weeks, with their potential drivers, as they are in the database now."""
+    return list(
+        await session.scalars(
+            select(Trip)
+            .where(Trip.is_penalty.is_(True))
+            .options(selectinload(Trip.potential_drivers))
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+async def test_away_period_cannot_end_too_far_ahead(session):
+    people = await make_users(session, n=4)
+    far = MONDAY + timedelta(days=users.MAX_AWAY_DAYS_AHEAD + 1)
+    with pytest.raises(UserError):
+        await users.add_away(session, people[1], MONDAY, far, MONDAY)
+    await users.add_away(session, people[1], MONDAY, far - timedelta(days=1), MONDAY)
+
+
+async def test_penalty_week_search_is_bounded(session):
+    """An endless away period (e.g. from before the limit) doesn't crash the daily job."""
+    people = await make_users(session, n=4)
+    target = people[1]
+    session.add(AwayPeriod(user_id=target.id, start_date=MONDAY, end_date=date(9999, 12, 31)))
+    await session.flush()
+    for _ in range(settings.strike_threshold):
+        await strikes.issue(session, user_id=target.id, reason="x", today=MONDAY)
+    [trip] = await penalty_trips(session)
+    assert trip.start_date == MONDAY + timedelta(days=7)
+
+
+async def test_revoking_a_redeemed_strike_cancels_the_open_penalty_week(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    await jobs.daily_tick(session, at(MONDAY))
+    kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
+    pd = kitchen.potential_drivers[0]
+    target = next(p for p in people if p.id == pd.user_id)
+    for _ in range(settings.strike_threshold - 1):
+        await strikes.issue(session, user_id=target.id, reason="x", today=MONDAY)
+    await session.commit()
+    # A missed duty gives the last strike and a penalty week ...
+    await jobs.daily_tick(session, at(MONDAY + timedelta(days=1)))
+    assert len(await penalty_trips(session)) == 1
+    assert await strikes.active_strikes(session, target.id) == []
+
+    # ... and marking that duty done after all takes both back.
+    pd = await duties.get_potential_driver(session, pd.id)
+    await duties.mark_as_driver(session, pd, admin, at(MONDAY + timedelta(days=1), 12))
+    await session.commit()
+    assert await penalty_trips(session) == []
+    assert len(await strikes.active_strikes(session, target.id)) == settings.strike_threshold - 1
+
+
+async def test_admin_revoking_a_strike_cancels_the_open_penalty_week(session):
+    people = await make_users(session, n=4)
+    target = people[1]
+    given = [
+        await strikes.issue(session, user_id=target.id, reason="x", today=MONDAY)
+        for _ in range(settings.strike_threshold)
+    ]
+    assert len(await penalty_trips(session)) == 1
+    await strikes.revoke(session, given[0], at(MONDAY))
+    assert await penalty_trips(session) == []
+    assert len(await strikes.active_strikes(session, target.id)) == settings.strike_threshold - 1
+
+
+async def test_disputed_driver_keeps_strike_when_partner_gets_the_credit(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, second, p1, p2 = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await duties.dispute(session, first, admin, at(MONDAY, 21))
+    await session.commit()
+
+    second = await duties.get_potential_driver(session, second.id)
+    await duties.mark_as_driver(session, second, admin, at(MONDAY, 22))
+    first = await duties.get_potential_driver(session, first.id)
+    assert second.status is Status.drove
+    assert first.status is Status.missed and first.disputed_at is not None
+    assert len(await strikes.active_strikes(session, p1.id)) == 1
+
+
+async def test_excuse_only_open_or_missed_duties(session):
+    people = await make_users(session)
+    admin = people[0]
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    with pytest.raises(DutyError):
+        await duties.excuse(session, first, admin, at(MONDAY, 21))
+    assert first.status is Status.drove
+
+
+async def test_paused_and_away_riders_pay_no_share(session):
+    """Someone who isn't a potential driver but becomes unavailable stops riding."""
+    people = await make_users(session, n=5)
+    await jobs.daily_tick(session, at(MONDAY))
+    trash = await duties.get_trip(session, Duty.trash, MONDAY)
+    trash_id, driver_id = trash.id, trash.potential_drivers[0].user_id
+    paused, away = [p for p in people if p.id != driver_id][:2]
+    paused_id, away_id = paused.id, away.id
+
+    await users.set_active(session, paused, False, at(MONDAY + timedelta(days=1), 12))
+    await users.add_away(
+        session, away, MONDAY + timedelta(days=2), MONDAY + timedelta(days=4), MONDAY
+    )
+    await session.commit()
+    trash = await session.scalar(
+        select(Trip)
+        .where(Trip.id == trash_id)
+        .options(selectinload(Trip.riders))
+        .execution_options(populate_existing=True)
+    )
+    riders = {r.user_id for r in trash.riders}
+    assert paused_id not in riders and away_id not in riders and driver_id in riders
+
+
+async def test_admin_action_before_the_deadline_hour_does_not_choose_today(session):
+    people = await make_users(session)
+    await jobs.daily_tick(session, at(MONDAY))
+    await session.commit()
+    tuesday = MONDAY + timedelta(days=1)
+    await users.create(
+        session, name="New", room_number="E120", username="new", password="secret123"
+    )
+    await duties.fill_current(session, at(tuesday, settings.deadline_hour - 1))
+    assert await duties.get_trip(session, Duty.kitchen, tuesday) is None
+    assert len(people) > 0
+
+
+async def test_penalty_week_moves_when_away_and_waits_while_paused(session):
+    people = await make_users(session, n=4)
+    target = people[1]
+    for _ in range(settings.strike_threshold):
+        await strikes.issue(session, user_id=target.id, reason="x", today=MONDAY)
+    [trip] = await penalty_trips(session)
+    week = trip.start_date
+
+    # Away in that week: the penalty week moves to the next free week.
+    await users.add_away(session, target, week, week + timedelta(days=2), MONDAY)
+    [trip] = await penalty_trips(session)
+    assert trip.start_date == week + timedelta(days=7)
+    await session.refresh(target)  # `add_away` expired everything
+
+    # Paused: no penalty week until they are back; the strikes count again.
+    await users.set_active(session, target, False, at(MONDAY, 12))
+    assert await penalty_trips(session) == []
+    assert len(await strikes.active_strikes(session, target.id)) == settings.strike_threshold
+    await users.set_active(session, target, True, at(MONDAY, 12))
+    assert len(await penalty_trips(session)) == 1
+
+
+async def test_bad_query_values_do_not_give_500(session, client):
+    await make_users(session, n=4)
+    await login(client, "p1")
+    for url in (
+        "/?cleaner=²",
+        "/?cleaner=" + "9" * 5000,
+        "/history?until=",
+        "/history?until=0001-01-01",
+    ):
+        r = await client.get(url)
+        assert r.status_code == 200, url
+
+
+async def test_admin_rejects_too_long_names(session, client):
+    people = await make_users(session, n=2)
+    await login(client, "p1")
+    data = {
+        "name": "x" * 200,
+        "room_number": "E150",
+        "username": "longname",
+        "password": "secret123",
+    }
+    r = await client.post("/admin/users", data=data)
+    assert r.status_code == 303
+    r = await client.post(
+        f"/admin/users/{people[1].id}/edit",
+        data={"name": "x" * 200, "room_number": people[1].room_number},
+    )
+    assert r.status_code == 303
+    assert "at most" in (await client.get("/admin")).text
+    user_id, name = people[1].id, people[1].name
+    session.expire_all()
+    assert (await session.get(User, user_id)).name == name
+
+
+async def test_htmx_request_without_login_redirects_the_whole_page(session, client):
+    r = await client.post("/potential-drivers/1/drove?card=1", headers={"HX-Request": "true"})
+    assert r.headers["hx-redirect"] == "/login?next=/"
+
+
+async def test_pages_send_security_headers(session, client):
+    r = await client.get("/login")
+    assert r.headers["x-frame-options"] == "DENY"
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_login_throttle_forgets_old_keys():
+    now = [0.0]
+    throttle = LoginThrottle(window_seconds=10, clock=lambda: now[0])
+    for i in range(1500):
+        throttle.record_failure(f"user{i}")
+    now[0] = 100.0
+    throttle.record_failure("fresh")
+    assert len(throttle._failures) == 1

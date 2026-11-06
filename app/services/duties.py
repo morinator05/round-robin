@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,7 +20,20 @@ from app.services.carpool import Balance, Member
 
 
 class DutyError(Exception):
-    """An action on a duty isn't allowed; the message is German and shown as is."""
+    """An action on a duty isn't allowed; the message is shown to the user as is."""
+
+
+# Arbitrary, app-wide id for the Postgres advisory lock that serializes changes to trips.
+DUTIES_LOCK_ID = 4004
+
+
+async def lock_trips(session: AsyncSession) -> None:
+    """Wait until no other transaction creates or reassigns trips, until this one ends.
+
+    Taken by the daily job and by admin actions that reassign duties, so they can't both
+    create the same trip. Re-entrant within one transaction.
+    """
+    await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DUTIES_LOCK_ID})
 
 
 def potential_drivers_per_trip(duty: Duty) -> int:
@@ -201,18 +214,31 @@ async def _add_potential_drivers(
     await session.flush()
 
 
-async def fill_current(session: AsyncSession, today: date) -> None:
-    """Make sure today's kitchen trip and this week's trash trip have potential drivers."""
+async def fill_current(session: AsyncSession, now: datetime) -> None:
+    """Make sure the current trips (`current_trip`) have enough potential drivers.
+
+    Before the deadline hour that is still yesterday's (last week's) trip: today's isn't
+    chosen before then (`choose_at`), so the previous one's outcome counts for it.
+    """
+    await lock_trips(session)
     for duty in Duty:
-        await materialize(session, duty, today)
+        if now >= choose_at(duty, now.date()):
+            await materialize(session, duty, now.date())
+        elif (trip := await current_trip(session, duty, now)) is not None:
+            await materialize(session, duty, trip.start_date)
 
 
 async def reconcile(session: AsyncSession, today: date) -> None:
     """Replace potential drivers of current/upcoming trips who no longer ride on them.
 
-    Called after someone marks themselves away, is deactivated or deleted. They are
-    removed from the trip's riders too, so they aren't charged a share.
+    Called after someone marks themselves away, is deactivated or deleted. Everyone who no
+    longer rides is removed from the riders of trips nobody has driven yet, so they aren't
+    charged a share. Moved-out residents (no user id) stay: like in the history, their
+    share is dropped, not passed on to the others.
+    Penalty weeks can't go to someone else: they move to the person's next free week, or,
+    for a paused resident, are cancelled until they are back (`users.set_active`).
     """
+    await lock_trips(session)
     members = {m.id: m for m in await load_members(session)}
     rooms = {uid: m.room for uid, m in members.items()}
 
@@ -223,11 +249,18 @@ async def reconcile(session: AsyncSession, today: date) -> None:
     trips = (
         await session.scalars(
             select(Trip)
-            .where(Trip.end_date >= today, Trip.is_penalty.is_(False))
+            .where(Trip.end_date >= today)
             .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
         )
     ).all()
     for trip in trips:
+        if trip.is_penalty:
+            await _reconcile_penalty(session, trip, members, today)
+            continue
+        riders = [r for r in trip.riders if r.user_id is None or rides(r.user_id, trip)]
+        if not was_driven(trip) and len(riders) != len(trip.riders):
+            trip.riders = riders
+            await session.flush()
         gone = [
             pd
             for pd in trip.potential_drivers
@@ -238,9 +271,26 @@ async def reconcile(session: AsyncSession, today: date) -> None:
         for pd in gone:
             trip.potential_drivers.remove(pd)
             await session.delete(pd)
-        trip.riders = [r for r in trip.riders if rides(r.user_id, trip)]
         await session.flush()
         await _add_potential_drivers(session, trip, len(gone), rooms)
+
+
+async def _reconcile_penalty(
+    session: AsyncSession, trip: Trip, members: dict[int, Member], today: date
+) -> None:
+    """Move an open penalty week whose person no longer rides on it (see `reconcile`)."""
+    pd = next(iter(trip.potential_drivers), None)
+    if pd is None or pd.status is not Status.pending or pd.user_id is None:
+        return
+    member = members.get(pd.user_id)
+    if member is None:  # paused; deleted residents' penalty weeks are gone already
+        await strikes.cancel_penalty(session, trip)
+        return
+    if member.rides(trip.start_date, trip.end_date):
+        return
+    week = await strikes.next_free_penalty_week(session, pd.user_id, today, trip.id)
+    trip.start_date, trip.end_date = week, week + timedelta(days=6)
+    await session.flush()
 
 
 async def process_overdue(session: AsyncSession, now: datetime) -> list[PotentialDriver]:
@@ -251,6 +301,9 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
             .join(PotentialDriver.trip)
             .where(PotentialDriver.status == Status.pending)
             .options(selectinload(PotentialDriver.trip))
+            # Waits for a duty being marked right now (`get_potential_driver` locks it too);
+            # Postgres then checks the status again, so it isn't struck after being marked.
+            .with_for_update(of=PotentialDriver)
         )
     ).all()
     missed = [pd for pd in pending if deadline(pd.trip) <= now]
@@ -273,9 +326,22 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
 async def get_potential_driver(session: AsyncSession, potential_driver_id: int) -> PotentialDriver:
     """The potential driver with their trip and the trip's other potential drivers loaded.
 
+    The trip's potential drivers are locked until the transaction ends, so two people
+    marking the same trip at once (or the daily job) wait for each other.
+
     Raises:
         DutyError: if there is no such potential driver.
     """
+    trip_id = await session.scalar(
+        select(PotentialDriver.trip_id).where(PotentialDriver.id == potential_driver_id)
+    )
+    if trip_id is None:
+        raise DutyError("Duty not found")
+    # Locked before they are loaded, so a request's (fresh) session reads them as they are
+    # after the other transaction finished.
+    await session.execute(
+        select(PotentialDriver.id).where(PotentialDriver.trip_id == trip_id).with_for_update()
+    )
     pd = await session.scalar(
         select(PotentialDriver)
         .where(PotentialDriver.id == potential_driver_id)
@@ -311,8 +377,8 @@ def can_mark_as_driver(pd: PotentialDriver, actor: User, now: datetime) -> bool:
 async def _revoke_strikes(session: AsyncSession, pd: PotentialDriver, now: datetime) -> None:
     """Take back the strikes given for this duty (it was done or excused after all)."""
     for s in await strikes.for_potential_driver(session, pd.id):
-        if s.is_active:
-            s.revoked_at = now
+        # Also strikes already used up by a penalty week: `revoke` cancels it if still open.
+        await strikes.revoke(session, s, now)
 
 
 async def mark_as_driver(
@@ -327,14 +393,20 @@ async def mark_as_driver(
         DutyError: if `actor` may not mark it (see `can_mark_as_driver`).
     """
     if not can_mark_as_driver(pd, actor, now):
-        raise DutyError("You can't tick off this duty")
+        raise DutyError(
+            "This duty can't be marked as done (any more): it's not yours, already done, "
+            "or past its deadline"
+        )
     await _revoke_strikes(session, pd, now)
     pd.status = Status.drove
     pd.completed_at = now
     pd.completed_by_id = actor.id
     pd.disputed_at = None
     for other in pd.trip.potential_drivers:
-        if other is not pd and other.status in (Status.pending, Status.missed):
+        # A disputed "done" stays missed with its strike: that person didn't clean.
+        if other is pd or other.disputed_at is not None:
+            continue
+        if other.status in (Status.pending, Status.missed):
             await _revoke_strikes(session, other, now)
             other.status = Status.rode
     await session.flush()
@@ -344,14 +416,17 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
     """Admin only: nobody is blamed, but the person gets no drive either.
 
     Raises:
-        DutyError: if `actor` isn't the floor speaker.
+        DutyError: if `actor` isn't the floor speaker or the duty isn't open or missed.
     """
     if not actor.is_admin:
         raise DutyError("Only the floor speaker can excuse duties")
+    if pd.status not in (Status.pending, Status.missed):
+        raise DutyError("Only open or missed duties can be excused")
     await _revoke_strikes(session, pd, now)
     pd.status = Status.excused
     pd.completed_at = now
     pd.completed_by_id = actor.id
+    pd.disputed_at = None
     await session.flush()
 
 

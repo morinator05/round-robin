@@ -9,6 +9,9 @@ from collections.abc import Callable
 
 MAX_FAILURES = 5
 WINDOW_SECONDS = 15 * 60
+# With more keys than this, expired ones are dropped on the next failure, so made-up
+# usernames can't grow the memory without bound.
+PRUNE_ABOVE_KEYS = 1000
 
 
 class LoginThrottle:
@@ -45,6 +48,9 @@ class LoginThrottle:
 
     def record_failure(self, key: str) -> None:
         """Remember a failed attempt now."""
+        if len(self._failures) > PRUNE_ABOVE_KEYS:
+            for old in list(self._failures):
+                self._recent_failures(old)
         self._failures.setdefault(key, []).append(self._clock())
 
     def reset(self, key: str) -> None:

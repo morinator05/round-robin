@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}My profile – {{ super() }}{% endblock %}
 {% block content %}
 <h1>{{ person(user) }}</h1>
 {% if not user.active %}<p class="flash error">You are inactive and won't be assigned any duties.</p>{% endif %}
@@ -44,7 +45,7 @@
       <td>{{ s.created_at|date_time }}</td>
       <td>{{ s.reason }}</td>
       <td class="end">{% if s.revoked_at %}<span class="badge s-excused">revoked</span>
-          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">served</span>
+          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>
           {% else %}<span class="badge s-missed">active</span>{% endif %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">No strikes.</td></tr>{% endfor %}

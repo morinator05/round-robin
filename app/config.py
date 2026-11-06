@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     strike_threshold: int = 3
     # How far ahead the dashboard preview looks.
     preview_days: int = 14
+    # Send the login cookie only over HTTPS. Turn on when the app is behind TLS.
+    secure_cookies: bool = False
     # Off in tests, so no background job touches the test database.
     run_scheduler: bool = True
     # Optional first floor speaker, created on startup while there are no users at all.
@@ -49,6 +51,23 @@ class Settings(BaseSettings):
                 "SECRET_KEY must be a random string of at least 32 characters, "
                 "e.g. from `openssl rand -hex 32`"
             )
+        return value
+
+    @field_validator("deadline_hour")
+    @classmethod
+    def deadline_hour_in_day(cls, value: int) -> int:
+        """An hour of the day, 0-23."""
+        if not 0 <= value <= 23:
+            raise ValueError("DEADLINE_HOUR must be between 0 and 23")
+        return value
+
+    @field_validator("deadline_days_after")
+    @classmethod
+    def deadline_after_duty(cls, value: int) -> int:
+        """At least 1: with 0 the deadline would be when the next duty is chosen, before
+        anyone could mark the duty."""
+        if value < 1:
+            raise ValueError("DEADLINE_DAYS_AFTER must be at least 1")
         return value
 
     @cached_property

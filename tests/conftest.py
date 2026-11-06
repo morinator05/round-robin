@@ -27,6 +27,13 @@ from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.models import Base  # noqa: E402
 
+# The fixtures drop the whole schema: never let an exported DATABASE_URL point them at
+# the development or production database.
+if not make_url(settings.database_url).database.endswith("_test"):
+    raise RuntimeError(
+        f"Tests need a database whose name ends in _test, not {settings.database_url!r}"
+    )
+
 
 async def ensure_test_database() -> None:
     """Create the test database if it doesn't exist yet."""

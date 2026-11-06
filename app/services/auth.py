@@ -9,6 +9,9 @@ from app.models import User, new_session_token
 
 MIN_PASSWORD_LENGTH = 8
 PASSWORD_TOO_SHORT = f"The password must have at least {MIN_PASSWORD_LENGTH} characters"
+# Argon2 would hash megabytes too; longer input is refused before hashing.
+MAX_PASSWORD_LENGTH = 1024
+PASSWORD_TOO_LONG = f"The password can have at most {MAX_PASSWORD_LENGTH} characters"
 TOO_MANY_ATTEMPTS = "Too many failed attempts, please try again in 15 minutes"
 
 _hasher = PasswordHash.recommended()
@@ -20,6 +23,20 @@ _DUMMY_HASH = _hasher.hash("no-such-user")
 def hash_password(password: str) -> str:
     """Hash for storing; includes a random salt, so equal passwords get different hashes."""
     return _hasher.hash(password)
+
+
+async def hash_password_off_loop(password: str) -> str:
+    """`hash_password` in a worker thread, like `verify_password_off_loop`."""
+    return await to_thread.run_sync(hash_password, password)
+
+
+def check_password_length(password: str) -> str | None:
+    """The error message if `password` is too short or too long, else None."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return PASSWORD_TOO_SHORT
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return PASSWORD_TOO_LONG
+    return None
 
 
 def verify_password(password: str, password_hash: str) -> bool:

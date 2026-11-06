@@ -13,9 +13,9 @@ from app.services import users  # noqa: E402
 
 async def main() -> None:
     name = input("Name: ")
-    room = input("Zimmer: ")
-    username = input("Benutzername: ")
-    password = getpass.getpass("Passwort: ")
+    room = input("Room (e.g. E103): ")
+    username = input("Username: ")
+    password = getpass.getpass("Password: ")
     async with SessionLocal() as session:
         try:
             user = await users.create(
