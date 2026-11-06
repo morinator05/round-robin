@@ -96,8 +96,14 @@ def flash(request: Request, message: str, kind: str = "ok") -> None:
 
 
 def render(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
-    """Render a full page; adds the user, pending messages and today's date."""
-    messages = request.session.pop("flash", [])
+    """Render a full page; adds the user, pending messages and today's date.
+
+    htmx requests that only take a part of the page (the card after "Done", switching the
+    plan) leave the messages queued: they would be dropped unseen. Boosted navigation shows
+    the whole page, so it takes them.
+    """
+    partial = request.headers.get("HX-Request") and not request.headers.get("HX-Boosted")
+    messages = [] if partial else request.session.pop("flash", [])
     return templates.TemplateResponse(
         request, name, {"user": user, "messages": messages, "today": settings.today(), **ctx}
     )
@@ -470,7 +476,8 @@ async def stats(request: Request, session: Session, user: CurrentUser):
     for uid, duty, is_penalty, status in rows:
         key = (uid, duty, "penalty" if is_penalty else status)
         counts[key] = counts.get(key, 0) + 1
-    active = {u.id: len(await strikes.active_strikes(session, u.id)) for u in all_users}
+    counts_by_user = await strikes.active_counts(session)
+    active = {u.id: counts_by_user.get(u.id, 0) for u in all_users}
     # Whole points per duty instead of fractions; ties go by who is chosen next.
     ids = [u.id for u in all_users]
     rooms = {u.id: u.room_number for u in all_users}

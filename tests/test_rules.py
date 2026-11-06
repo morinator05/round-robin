@@ -1549,3 +1549,22 @@ async def test_admin_sees_and_deletes_absences(session, client):
     r = await client.post(f"/me/away/{away_id}/delete?next=/admin")
     assert r.headers["location"] == "/admin"
     assert await session.scalar(select(func.count(AwayPeriod.id))) == 0
+
+
+async def test_htmx_partials_leave_messages_for_the_next_page(session, client):
+    await make_users(session, n=2)
+    await login(client, "p1")
+    await client.post("/admin/tick")  # queues "Daily job done"
+    # The plan switch takes only a part of the dashboard: the message must not be used up.
+    assert "Daily job done" not in (await client.get("/", headers={"HX-Request": "true"})).text
+    page = await client.get("/", headers={"HX-Request": "true", "HX-Boosted": "true"})
+    assert "Daily job done" in page.text
+
+
+async def test_stats_counts_active_strikes(session, client):
+    people = await make_users(session, n=3)
+    await strikes.issue(session, user_id=people[1].id, reason="x", today=MONDAY)
+    revoked = await strikes.issue(session, user_id=people[2].id, reason="x", today=MONDAY)
+    await strikes.revoke(session, revoked, at(MONDAY))
+    await session.commit()
+    assert await strikes.active_counts(session) == {people[1].id: 1}

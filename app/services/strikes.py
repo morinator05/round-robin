@@ -2,7 +2,7 @@
 
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -19,19 +19,29 @@ async def for_potential_driver(session: AsyncSession, potential_driver_id: int) 
     )
 
 
+# Strikes that still count: neither revoked nor used up by a penalty week (in SQL, like
+# `Strike.is_active`).
+ACTIVE = and_(Strike.revoked_at.is_(None), Strike.redeemed_by_trip_id.is_(None))
+
+
 async def active_strikes(session: AsyncSession, user_id: int) -> list[Strike]:
     """The user's strikes that still count, oldest first."""
     return list(
         await session.scalars(
             select(Strike)
-            .where(
-                Strike.user_id == user_id,
-                Strike.revoked_at.is_(None),
-                Strike.redeemed_by_trip_id.is_(None),
-            )
+            .where(Strike.user_id == user_id, ACTIVE)
             .order_by(Strike.created_at, Strike.id)
         )
     )
+
+
+async def active_counts(session: AsyncSession) -> dict[int, int]:
+    """Number of active strikes per user id, for everyone at once (users without any are
+    missing)."""
+    rows = await session.execute(
+        select(Strike.user_id, func.count()).where(ACTIVE).group_by(Strike.user_id)
+    )
+    return dict(rows.all())
 
 
 async def issue(
