@@ -229,8 +229,12 @@ async def fill_current(session: AsyncSession, now: datetime) -> None:
             await materialize(session, duty, trip.start_date)
 
 
-async def reconcile(session: AsyncSession, today: date) -> None:
+async def reconcile(session: AsyncSession, today: date, keep_user_id: int | None = None) -> None:
     """Replace potential drivers of current/upcoming trips who no longer ride on them.
+
+    `keep_user_id`: a resident who just marked themselves away. A regular trip they are
+    already a pending potential driver on stays theirs (and they stay a rider of it); the
+    absence only keeps them from being chosen again. The floor speaker can excuse it.
 
     Called after someone marks themselves away, is deactivated or deleted. Everyone who no
     longer rides is removed from the riders of trips nobody has driven yet, so they aren't
@@ -258,14 +262,27 @@ async def reconcile(session: AsyncSession, today: date) -> None:
         if trip.is_penalty:
             await _reconcile_penalty(session, trip, members, today)
             continue
-        riders = [r for r in trip.riders if r.user_id is None or rides(r.user_id, trip)]
+        kept = {
+            pd.user_id
+            for pd in trip.potential_drivers
+            if keep_user_id is not None
+            and pd.user_id == keep_user_id
+            and pd.status is Status.pending
+        }
+        riders = [
+            r
+            for r in trip.riders
+            if r.user_id is None or r.user_id in kept or rides(r.user_id, trip)
+        ]
         if not was_driven(trip) and len(riders) != len(trip.riders):
             trip.riders = riders
             await session.flush()
         gone = [
             pd
             for pd in trip.potential_drivers
-            if pd.status is Status.pending and not rides(pd.user_id, trip)
+            if pd.status is Status.pending
+            and pd.user_id not in kept
+            and not rides(pd.user_id, trip)
         ]
         if not gone:
             continue

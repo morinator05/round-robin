@@ -335,13 +335,31 @@ async def add_away(
     start_date: Annotated[date, Form()],
     end_date: Annotated[date, Form()],
 ):
-    """Add an away period for yourself."""
+    """Add an away period for yourself. Says so if a duty you already have falls into it."""
+    user_id, now = user.id, settings.now()
     try:
-        await users.add_away(session, user, start_date, end_date, settings.today())
+        await users.add_away(session, user, start_date, end_date, now.date())
         await session.commit()
-        flash(request, "Away period added")
     except UserError as e:
         flash(request, str(e), "error")
+        return redirect("/me")
+    flash(request, "Away period added")
+    for duty in Duty:
+        trip = await duties.current_trip(session, duty, now)
+        if (
+            trip is not None
+            and trip.start_date <= end_date
+            and start_date <= trip.end_date
+            and any(
+                pd.user_id == user_id and pd.status is Status.pending
+                for pd in trip.potential_drivers
+            )
+        ):
+            flash(
+                request,
+                f"Your current {duty.label.lower()} stays with you; if you can't do it, "
+                "ask the floor speaker to excuse it",
+            )
     return redirect("/me")
 
 

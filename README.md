@@ -56,8 +56,9 @@ rounded so that they still sum to 0.
   isn't away. It replaces the regular trash duty, doesn't count for fairness and uses up the
   3 strikes.
 
-**Absences** ("Away", on "My profile"): not picked during that time; open duties in
-it are reassigned immediately. Deleting the absence doesn't give them back.
+**Absences** ("Away", on "My profile"): not picked during that time. A duty you already
+have stays yours (the floor speaker can excuse it); a penalty week moves to your next free
+week.
 
 **Floor speaker (admin)**, on "Admin"
 - Add, edit, pause ("Deactivate") and delete ("Delete (moved out)") residents; hand over the

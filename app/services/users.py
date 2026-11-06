@@ -160,7 +160,10 @@ async def delete(session: AsyncSession, user: User, now: datetime) -> None:
 
 
 async def add_away(session: AsyncSession, user: User, start: date, end: date, today: date) -> None:
-    """Mark a resident away from `start` to `end`; open duties in that time are reassigned.
+    """Mark a resident away from `start` to `end`: they aren't chosen during that time.
+
+    A duty they already have stays theirs (the floor speaker can excuse it); an upcoming
+    penalty week moves to their next free week.
 
     Raises:
         UserError: if the period is reversed, already over or ends too far ahead.
@@ -174,10 +177,11 @@ async def add_away(session: AsyncSession, user: User, start: date, end: date, to
             f"Away periods can end at most {MAX_AWAY_DAYS_AHEAD} days from today; "
             "for longer, ask the floor speaker to pause you"
         )
-    session.add(AwayPeriod(user_id=user.id, start_date=start, end_date=end))
+    user_id = user.id
+    session.add(AwayPeriod(user_id=user_id, start_date=start, end_date=end))
     await session.flush()
     session.expire_all()
-    await duties.reconcile(session, today)
+    await duties.reconcile(session, today, keep_user_id=user_id)
 
 
 async def remove_away(session: AsyncSession, away: AwayPeriod) -> None:

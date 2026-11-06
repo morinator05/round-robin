@@ -420,25 +420,51 @@ async def test_admin_marking_missed_driver_revokes_strike(session):
     assert len(await strikes.active_strikes(session, pd.user_id)) == 0
 
 
-async def test_away_replaces_pending_potential_driver(session):
+async def test_away_keeps_assigned_duty_but_is_not_chosen_again(session):
+    """An absence doesn't take you off a duty you already have (the floor speaker can
+    excuse it), but you aren't chosen during it."""
     people = await make_users(session)
     await jobs.daily_tick(session, at(MONDAY))
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
-    leaving_id = kitchen.potential_drivers[0].user_id
-    leaving = next(p for p in people if p.id == leaving_id)
+    away_id = kitchen.potential_drivers[0].user_id
+    before = [pd.user_id for pd in kitchen.potential_drivers]
+    away = next(p for p in people if p.id == away_id)
 
-    await users.add_away(session, leaving, MONDAY, MONDAY + timedelta(days=3), MONDAY)
+    await users.add_away(session, away, MONDAY, MONDAY + timedelta(days=3), MONDAY)
     await session.commit()
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
-    ids = [pd.user_id for pd in kitchen.potential_drivers]
-    assert len(ids) == 2 and leaving_id not in ids
+    assert [pd.user_id for pd in kitchen.potential_drivers] == before
+    await session.refresh(kitchen, ["riders"])
+    assert away_id in {r.user_id for r in kitchen.riders}
 
     preview = await duties.preview(
         session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=3)
     )
-    assert all(
-        leaving_id not in e.potential_drivers for plan in preview.plans.values() for e in plan
-    )
+    assert all(away_id not in e.potential_drivers for plan in preview.plans.values() for e in plan)
+
+
+async def test_pausing_replaces_pending_potential_driver(session):
+    people = await make_users(session)
+    await jobs.daily_tick(session, at(MONDAY))
+    kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
+    paused_id = kitchen.potential_drivers[0].user_id
+    paused = next(p for p in people if p.id == paused_id)
+
+    await users.set_active(session, paused, False, at(MONDAY, 12))
+    await session.commit()
+    kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
+    ids = [pd.user_id for pd in kitchen.potential_drivers]
+    assert len(ids) == 2 and paused_id not in ids
+
+
+async def test_away_over_own_duty_says_it_stays(session, client):
+    people = await make_users(session, n=4)
+    _, first, _, p1, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, p1.username)
+    today = settings.today().isoformat()
+    await client.post("/me/away", data={"start_date": today, "end_date": today})
+    text = (await client.get("/me")).text
+    assert "Away period added" in text and "stays with you" in text
 
 
 async def test_delete_user_keeps_history_and_replaces(session):
