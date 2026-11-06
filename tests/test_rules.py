@@ -1203,7 +1203,15 @@ async def test_stats_shows_whole_points(session, client):
     assert all(c == "0" for c in cells[1::2])
 
 
-async def test_dashboard_switches_between_plans(session, client):
+@pytest.fixture
+def midday(monkeypatch):
+    """The app's clock at noon today: after the deadline hour, so the dashboard shows
+    today's trip (before it, yesterday's), whenever the tests run."""
+    noon = at(settings.today(), 12)
+    monkeypatch.setattr(type(settings), "now", lambda self: noon)
+
+
+async def test_dashboard_switches_between_plans(session, client, midday):
     people = await make_users(session, n=6)
     _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
     await session.commit()
@@ -1228,7 +1236,7 @@ async def test_dashboard_switches_between_plans(session, client):
     assert r.status_code == 200 and current(r.text) == [str(p2.id)]
 
 
-async def test_switching_plans_shows_different_tables(session, client):
+async def test_switching_plans_shows_different_tables(session, client, midday):
     people = await make_users(session, n=6)
     _, _, _, p1, p2 = await kitchen_pair(session, people, settings.today())
     await session.commit()
