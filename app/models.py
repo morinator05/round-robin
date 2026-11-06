@@ -1,6 +1,7 @@
 """Database tables (SQLAlchemy). Schema changes need a migration in `migrations/`."""
 
 import enum
+import secrets
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -19,6 +20,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     """Base class of all tables."""
+
+
+def new_session_token() -> str:
+    """A random value for `User.session_token`."""
+    return secrets.token_urlsafe(32)
 
 
 class Duty(str, enum.Enum):
@@ -71,6 +77,10 @@ class User(Base):
     room_number: Mapped[str] = mapped_column(String(20))
     username: Mapped[str] = mapped_column(String(50), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    # Also in the session cookie; a cookie only counts if it matches. A new one (on logout
+    # and password changes, `auth.end_sessions`) logs the user out on every device. A
+    # database reset gives everyone new ones, so old cookies don't point at new people.
+    session_token: Mapped[str] = mapped_column(String(64), default=new_session_token)
     # The floor speaker, who can manage residents, strikes and everybody's duties.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     # Inactive users are paused: they don't ride, so they are never chosen and owe nothing.

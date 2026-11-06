@@ -77,7 +77,8 @@ deleted) are replaced on their open duties immediately.
 ## Pages
 
 Everything except the login page needs a login, so nobody else on the network sees names,
-rooms or duties.
+rooms or duties. Logging out logs you out on all your devices; changing your password (or
+the floor speaker setting a new one) logs out all other devices.
 
 | Page | Access | Content |
 |---|---|---|

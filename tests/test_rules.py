@@ -5,6 +5,7 @@ import base64
 import json
 import random
 import re
+from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
 
@@ -18,7 +19,7 @@ from app import web
 from app.config import settings
 from app.main import app
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
-from app.services import duties, jobs, strikes, users
+from app.services import auth, duties, jobs, strikes, users
 from app.services.duties import DutyError
 from app.services.login_throttle import LoginThrottle
 from app.services.users import UserError
@@ -487,8 +488,13 @@ async def client(session_factory):
 
 async def login(client, username):
     """Log in as `username` with the test password."""
-    r = await client.post("/login", data={"username": username, "password": "secret123"})
-    assert r.status_code == 303
+    await login_with(client, username, "secret123")
+
+
+async def login_with(client, username, password):
+    """Log in as `username`; fails the test if that doesn't work."""
+    r = await client.post("/login", data={"username": username, "password": password})
+    assert r.status_code == 303 and r.headers["location"] == "/", f"login as {username} failed"
 
 
 async def test_web_permissions(session, client):
@@ -697,8 +703,9 @@ async def test_forged_session_cookie_is_no_login(session, client):
     admin = people[0]
 
     def signed_with(key: str) -> str:
-        middleware = SessionMiddleware(app=None, secret_key=key)
-        return middleware.signer.sign(session_payload({"user_id": admin.id})).decode()
+        data = {"user_id": admin.id, "token": admin.session_token}
+        signer = SessionMiddleware(app=None, secret_key=key).signer
+        return signer.sign(session_payload(data)).decode()
 
     # Control: built like this with the app's key, the cookie is a login. So the cases
     # below fail because of the key or the signature, not because the cookie is malformed.
@@ -716,6 +723,141 @@ async def test_forged_session_cookie_is_no_login(session, client):
     _, signature = client.cookies["a4_session"].split(".", 1)
     set_session_cookie(client, f"{session_payload({'user_id': admin.id}).decode()}.{signature}")
     assert_sent_to_login(await client.get("/admin"), "/admin", people)
+
+
+def session_cookie_for(data: dict) -> str:
+    """A session cookie with `data`, validly signed with the app's key."""
+    signer = SessionMiddleware(app=None, secret_key=settings.secret_key).signer
+    return signer.sign(session_payload(data)).decode()
+
+
+@asynccontextmanager
+async def device():
+    """Another browser (phone, laptop) with its own cookies, on the same app."""
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+
+
+async def is_logged_in(client) -> bool:
+    r = await client.get("/me")
+    if r.status_code == 303:
+        assert r.headers["location"].startswith("/login"), r.headers["location"]
+        return False
+    assert r.status_code == 200
+    return True
+
+
+async def test_cookie_without_a_session_token_is_no_login(session, client):
+    """Cookies from before session tokens (only a user id) no longer log anyone in."""
+    people = await make_users(session, n=3)
+    set_session_cookie(client, session_cookie_for({"user_id": people[0].id}))
+    assert_sent_to_login(await client.get("/admin"), "/admin", people)
+    # Control: with the token it is a login.
+    data = {"user_id": people[0].id, "token": people[0].session_token}
+    set_session_cookie(client, session_cookie_for(data))
+    assert (await client.get("/admin")).status_code == 200
+
+
+async def test_session_from_an_earlier_database_is_no_login(session, client):
+    """After a reset, ids start over: an old cookie must not log you in as whoever has
+    that id now."""
+    people = await make_users(session, n=3)
+    await login(client, "p2")
+    old_cookie = client.cookies["a4_session"]
+    old_id = people[1].id
+    await users.delete(session, people[1], settings.today())
+    await session.commit()
+    session.add(
+        User(
+            id=old_id,
+            name="Someone Else",
+            room_number="E120",
+            username="else",
+            password_hash=auth.hash_password("secret123"),
+        )
+    )
+    await session.commit()
+    assert_sent_to_login(await client.get("/me"), "/me", [people[0], people[2]])
+    assert "a4_session" not in client.cookies
+
+    # Logging out with the old cookie must not log out the new resident either.
+    async with device() as theirs:
+        await login(theirs, "else")
+        set_session_cookie(client, old_cookie)
+        await client.post("/logout")
+        assert await is_logged_in(theirs)
+
+
+async def test_logout_ends_the_session_on_every_device(session, client):
+    await make_users(session, n=3)
+    async with device() as phone, device() as copy, device() as other_user:
+        await login(client, "p2")
+        await login(phone, "p2")
+        copy.cookies.set("a4_session", client.cookies["a4_session"])  # e.g. sniffed
+        await login(other_user, "p3")
+        assert all([await is_logged_in(c) for c in (client, phone, copy, other_user)])
+
+        await client.post("/logout")
+        assert not await is_logged_in(client)
+        assert not await is_logged_in(phone)
+        assert not await is_logged_in(copy)
+        assert await is_logged_in(other_user)
+        # Logging in again works, also on the other device.
+        await login(phone, "p2")
+        assert await is_logged_in(phone)
+
+
+async def test_password_change_ends_the_other_sessions(session, client):
+    await make_users(session, n=3)
+    async with device() as phone:
+        await login(client, "p2")
+        await login(phone, "p2")
+        r = await client.post(
+            "/me/password", data={"old_password": "secret123", "new_password": "new-secret-1"}
+        )
+        assert "Password changed" in (await client.get(r.headers["location"])).text
+        # Whoever changed it stays logged in, everywhere else it's over.
+        assert await is_logged_in(client)
+        assert not await is_logged_in(phone)
+
+        # A rejected change (wrong old password, too short) ends nothing.
+        await login_with(phone, "p2", "new-secret-1")
+        for old, new in (("wrong", "other-secret-1"), ("new-secret-1", "short")):
+            await client.post("/me/password", data={"old_password": old, "new_password": new})
+        assert await is_logged_in(client) and await is_logged_in(phone)
+
+
+async def test_password_set_by_the_floor_speaker_ends_the_residents_sessions(session, client):
+    people = await make_users(session, n=3)
+    p2 = people[1]
+    async with device() as resident:
+        await login(resident, "p2")
+        await login(client, "p1")
+
+        async def edit(user, name, password=""):
+            data = {"name": name, "room_number": user.room_number, "password": password}
+            r = await client.post(f"/admin/users/{user.id}/edit", data=data)
+            assert r.status_code == 303 and r.headers["location"] == "/admin"
+            saved = f"{name.split()[0]} ({user.room_number}) saved"
+            assert saved in (await client.get("/admin")).text
+
+        # Only a new password ends the sessions, not a new name.
+        await edit(p2, "Renamed")
+        assert await is_logged_in(resident)
+        await edit(p2, "Renamed", "reset-pass-1")
+        assert not await is_logged_in(resident)
+        await login_with(resident, "p2", "reset-pass-1")
+        assert await is_logged_in(resident)
+
+        # Setting your own password as floor speaker: this browser stays logged in, your
+        # other devices don't.
+        async with device() as admin_phone:
+            await login(admin_phone, "p1")
+            await edit(people[0], "Person 1", "admin-pass-1")
+            assert (await client.get("/admin")).status_code == 200
+            assert not await is_logged_in(admin_phone)
 
 
 async def test_help_page(session, client):
