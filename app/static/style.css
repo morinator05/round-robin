@@ -299,3 +299,9 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   /* The help page's two-column tables wrap instead of scrolling sideways. */
   .card.help .table-wrap table { min-width: 0; }
 }
+
+/* Text only for screen readers, e.g. headers of columns with buttons. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

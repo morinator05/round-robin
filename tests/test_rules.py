@@ -18,6 +18,7 @@ from starlette.routing import Route
 
 from app import web
 from app.config import settings
+from app.formatting import long_date
 from app.main import app
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, duties, jobs, strikes, users
@@ -1507,3 +1508,44 @@ def test_login_throttle_forgets_old_keys():
     now[0] = 100.0
     throttle.record_failure("fresh")
     assert len(throttle._failures) == 1
+
+
+async def test_login_expires_after_the_maximum_lifetime(session, client, monkeypatch):
+    from app import deps
+
+    await make_users(session, n=2)
+    now = [1_000_000.0]
+    monkeypatch.setattr(deps, "clock", lambda: now[0])
+    await login(client, "p2")
+    assert (await client.get("/me")).status_code == 200
+    now[0] += deps.SESSION_MAX_SECONDS - 60
+    assert (await client.get("/me")).status_code == 200
+    now[0] += 120
+    assert (await client.get("/me")).status_code == 303
+
+
+async def test_login_is_limited_per_account_across_ips(session, monkeypatch):
+    monkeypatch.setattr("app.web.account_throttle", LoginThrottle(max_failures=4))
+    await make_users(session, n=2)
+    for i in range(4):
+        # Each attempt from another address: the per-IP limit never kicks in.
+        transport = httpx.ASGITransport(app=app, client=(f"10.0.0.{i}", 1234))
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await c.post("/login", data={"username": "p2", "password": "wrong"})
+    transport = httpx.ASGITransport(app=app, client=("10.0.0.99", 1234))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        r = await c.post("/login", data={"username": "p2", "password": "secret123"})
+        assert "Too many failed attempts" in (await c.get(r.headers["location"])).text
+
+
+async def test_admin_sees_and_deletes_absences(session, client):
+    people = await make_users(session, n=3)
+    later = settings.today() + timedelta(days=10)
+    await users.add_away(session, people[2], later, later + timedelta(days=2), settings.today())
+    await session.commit()
+    away_id = (await session.scalar(select(AwayPeriod))).id
+    await login(client, "p1")
+    assert long_date(later) in (await client.get("/admin")).text
+    r = await client.post(f"/me/away/{away_id}/delete?next=/admin")
+    assert r.headers["location"] == "/admin"
+    assert await session.scalar(select(func.count(AwayPeriod.id))) == 0

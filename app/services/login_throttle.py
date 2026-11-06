@@ -1,5 +1,8 @@
 """Slows down password guessing: too many failed logins block that login for a while.
 
+Two limits: per username and IP (`login_throttle`), and per username over all IPs
+(`account_throttle`, higher).
+
 The failures are kept in memory, so they are per process and reset on restart. That is
 enough for a single small app instance.
 """
@@ -68,4 +71,9 @@ class LoginThrottle:
         return recent
 
 
+# Per username and IP.
 login_throttle = LoginThrottle()
+# Per username from all IPs together, against guessing from many addresses. Higher, so an
+# attacker can't lock someone out as easily.
+ACCOUNT_MAX_FAILURES = 20
+account_throttle = LoginThrottle(max_failures=ACCOUNT_MAX_FAILURES)

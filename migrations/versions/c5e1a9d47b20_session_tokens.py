@@ -26,7 +26,12 @@ def upgrade() -> None:
     """Upgrade schema."""
     op.add_column("users", sa.Column("session_token", sa.String(length=64), nullable=True))
     # Random per row; the app makes new ones with `secrets.token_urlsafe`.
-    op.execute("UPDATE users SET session_token = md5(random()::text || id::text)")
+    # gen_random_uuid() uses a cryptographically secure source (random() doesn't); two of
+    # them without dashes are 64 hex characters, like `models.new_session_token`.
+    op.execute(
+        "UPDATE users SET session_token = "
+        "replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')"
+    )
     op.alter_column("users", "session_token", nullable=False)
 
 

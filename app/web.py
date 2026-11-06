@@ -22,13 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import deps
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session, require_user
 from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, carpool, duties, jobs, strikes, users
 from app.services.duties import DutyError
-from app.services.login_throttle import login_throttle
+from app.services.login_throttle import account_throttle, login_throttle
 from app.services.users import UserError
 
 public = APIRouter()
@@ -103,9 +104,10 @@ def render(request: Request, name: str, user: User | None, **ctx) -> HTMLRespons
 
 
 def start_session(request: Request, user: User) -> None:
-    """Log `user` in, in this browser."""
+    """Log `user` in, in this browser (for at most `deps.SESSION_MAX_SECONDS`)."""
     request.session["user_id"] = user.id
     request.session["token"] = user.session_token
+    request.session["logged_in_at"] = int(deps.clock())
 
 
 def redirect(url: str) -> RedirectResponse:
@@ -179,14 +181,16 @@ async def login(
     password: Annotated[str, Form()],
     next: Annotated[str, Form()] = "/",
 ):
-    """Log in. Too many failed attempts block the username from that IP for a while."""
+    """Log in. Too many failed attempts block the username from that IP for a while, and
+    (with a higher limit, so others can't easily lock someone out) from everywhere."""
     client_ip = request.client.host if request.client else "unknown"
     # No real account has a longer username or password; don't keep or hash such input.
     if len(username) > users.MAX_USERNAME_LENGTH or len(password) > auth.MAX_PASSWORD_LENGTH:
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
-    throttle_key = f"{username.strip().lower()}@{client_ip}"
-    if not login_throttle.try_attempt(throttle_key):
+    name = username.strip().lower()
+    throttle_key, account_key = f"{name}@{client_ip}", f"user:{name}"
+    if not (login_throttle.try_attempt(throttle_key) and account_throttle.try_attempt(account_key)):
         flash(request, auth.TOO_MANY_ATTEMPTS, "error")
         return redirect(f"/login?next={safe_next(next)}")
 
@@ -195,6 +199,7 @@ async def login(
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
+    account_throttle.reset(account_key)
     start_session(request, user)
     return redirect(safe_next(next))
 
@@ -372,7 +377,8 @@ async def delete_away(request: Request, session: Session, user: CurrentUser, awa
     await users.remove_away(session, away)
     await session.commit()
     flash(request, "Away period deleted")
-    return redirect("/me")
+    # The admin page posts with `next=/admin`.
+    return redirect(safe_next(request.query_params.get("next") or "/me"))
 
 
 @router.post("/me/password")
@@ -518,6 +524,13 @@ async def admin(request: Request, session: Session, user: AdminUser):
         .order_by(Strike.created_at.desc())
         .limit(50)
     )
+    # Current and upcoming absences of everyone, so unusual ones are noticed.
+    aways = await session.scalars(
+        select(AwayPeriod)
+        .where(AwayPeriod.end_date >= settings.today())
+        .options(selectinload(AwayPeriod.user))
+        .order_by(AwayPeriod.start_date, AwayPeriod.id)
+    )
     return render(
         request,
         "admin/index.html",
@@ -525,6 +538,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         users=all_users,
         trips=list(trips),
         strikes=list(all_strikes),
+        aways=list(aways),
     )
 
 
