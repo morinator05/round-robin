@@ -64,7 +64,7 @@ app = FastAPI(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
-    session_cookie="a4_session",
+    session_cookie="rr_session",
     same_site="lax",
     https_only=settings.secure_cookies,
     max_age=60 * 60 * 24 * 90,  # stay logged in for 90 days

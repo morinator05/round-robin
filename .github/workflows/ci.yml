@@ -25,17 +25,17 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: a4
-          POSTGRES_PASSWORD: a4
-          POSTGRES_DB: a4_test
+          POSTGRES_USER: e1
+          POSTGRES_PASSWORD: e1
+          POSTGRES_DB: e1_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U a4"
+          --health-cmd "pg_isready -U e1"
           --health-interval 5s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql+asyncpg://a4:a4@localhost:5432/a4_test
+      DATABASE_URL: postgresql+asyncpg://e1:e1@localhost:5432/e1_test
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
@@ -43,10 +43,10 @@ jobs:
       # The migrations build the same schema as the models (tests use the models directly).
       - name: Migrations
         env:
-          PGPASSWORD: a4
-          DATABASE_URL: postgresql+asyncpg://a4:a4@localhost:5432/a4_migrations
+          PGPASSWORD: e1
+          DATABASE_URL: postgresql+asyncpg://e1:e1@localhost:5432/e1_migrations
         run: |
-          createdb -h localhost -U a4 a4_migrations
+          createdb -h localhost -U e1 e1_migrations
           uv run alembic upgrade head
           uv run alembic check
       - run: uv run pytest

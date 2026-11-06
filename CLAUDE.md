@@ -101,7 +101,7 @@ current/upcoming trips and chooses replacements.
 
 ## Tests
 
-- `tests/conftest.py` points at a separate `a4_test` database (created if missing), drops
+- `tests/conftest.py` points at a separate `e1_test` database (created if missing), drops
   the `public` schema and recreates all tables per test from `Base.metadata` (not via
   migrations), disables the scheduler, and monkeypatches `app.db.SessionLocal`. Use the
   `session` fixture.

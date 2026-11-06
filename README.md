@@ -97,7 +97,7 @@ In `.env`, see `.env.example`.
 | Setting | Default | Meaning |
 |---|---|---|
 | `SECRET_KEY` | – | Required, ≥ 32 chars (`openssl rand -hex 32`). Signs the session cookie. |
-| `POSTGRES_PASSWORD` | `a4` | Database password. Use a random one on a server. |
+| `POSTGRES_PASSWORD` | `e1` | Database password. Use a random one on a server. |
 | `DATABASE_URL` | local database | Only needed outside Docker. |
 | `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
 | `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
@@ -124,16 +124,16 @@ In `.env`, see `.env.example`.
 ```bash
 cp .env.example .env                    # set SECRET_KEY: openssl rand -hex 32
 docker compose up -d --build            # database + app, http://localhost:8000
-docker compose exec app uv run --no-dev python scripts/create_admin.py   # first floor speaker
+docker compose exec app python scripts/create_admin.py   # first floor speaker
 ```
 
 - **First floor speaker without the script:** set the `ADMIN_*` variables in `.env`. The app
   creates the account on startup only while there are no users, so a deleted admin doesn't
   come back.
 - **Server:** set a random `POSTGRES_PASSWORD` before the first start (later changes need
-  `ALTER USER a4 PASSWORD '...'` in the database).
+  `ALTER USER <user> PASSWORD '...'` in the database).
 - **Update:** `docker compose up -d --build`. Migrations run on every start.
-- **Test residents:** `docker compose exec app uv run --no-dev python scripts/seed.py`. Add
+- **Test residents:** `docker compose exec app python scripts/seed.py`. Add
   `--days 30` (on an empty database) for a simulated month of duties, misses and strikes.
 - **Reset:** `docker compose down -v` deletes the database.
 

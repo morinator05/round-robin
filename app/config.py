@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://a4:a4@localhost:5432/a4"
+    database_url: str = "postgresql+asyncpg://e1:e1@localhost:5432/e1"
     # Signs the login cookie: whoever knows it can log in as anyone. No usable default on purpose.
     secret_key: str = ""
     timezone: str = "Europe/Berlin"

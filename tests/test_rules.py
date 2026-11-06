@@ -718,7 +718,7 @@ async def test_session_of_a_deleted_user_is_no_login(session, client):
     await session.commit()
     assert_sent_to_login(await client.get("/me"), "/me", people[:2] + people[3:])
     # The stale session was cleared.
-    assert "a4_session" not in client.cookies
+    assert "rr_session" not in client.cookies
 
 
 async def test_logged_out_session_is_no_login(session, client):
@@ -737,7 +737,7 @@ def session_payload(data: dict) -> bytes:
 def set_session_cookie(client, value: str) -> None:
     """Replace the session cookie (not add a second one next to it)."""
     client.cookies.clear()
-    client.cookies.set("a4_session", value)
+    client.cookies.set("rr_session", value)
 
 
 async def test_forged_session_cookie_is_no_login(session, client):
@@ -762,7 +762,7 @@ async def test_forged_session_cookie_is_no_login(session, client):
     # longer matches.
     client.cookies.clear()
     await login(client, "p2")
-    _, signature = client.cookies["a4_session"].split(".", 1)
+    _, signature = client.cookies["rr_session"].split(".", 1)
     set_session_cookie(client, f"{session_payload({'user_id': admin.id}).decode()}.{signature}")
     assert_sent_to_login(await client.get("/admin"), "/admin", people)
 
@@ -807,7 +807,7 @@ async def test_session_from_an_earlier_database_is_no_login(session, client):
     that id now."""
     people = await make_users(session, n=3)
     await login(client, "p2")
-    old_cookie = client.cookies["a4_session"]
+    old_cookie = client.cookies["rr_session"]
     old_id = people[1].id
     await users.delete(session, people[1], settings.now())
     await session.commit()
@@ -822,7 +822,7 @@ async def test_session_from_an_earlier_database_is_no_login(session, client):
     )
     await session.commit()
     assert_sent_to_login(await client.get("/me"), "/me", [people[0], people[2]])
-    assert "a4_session" not in client.cookies
+    assert "rr_session" not in client.cookies
 
     # Logging out with the old cookie must not log out the new resident either.
     async with device() as theirs:
@@ -837,7 +837,7 @@ async def test_logout_ends_the_session_on_every_device(session, client):
     async with device() as phone, device() as copy, device() as other_user:
         await login(client, "p2")
         await login(phone, "p2")
-        copy.cookies.set("a4_session", client.cookies["a4_session"])  # e.g. sniffed
+        copy.cookies.set("rr_session", client.cookies["rr_session"])  # e.g. sniffed
         await login(other_user, "p3")
         assert all([await is_logged_in(c) for c in (client, phone, copy, other_user)])
 

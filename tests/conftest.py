@@ -1,8 +1,8 @@
-"""Test setup: a separate `a4_test` database, recreated empty for every test."""
+"""Test setup: a separate `e1_test` database, recreated empty for every test."""
 
 import os
 
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://a4:a4@localhost:5432/a4_test")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://e1:e1@localhost:5432/e1_test")
 os.environ["RUN_SCHEDULER"] = "false"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-0123456789")
 # The rules as the defaults have them, whatever a local .env says (env vars win over .env).
