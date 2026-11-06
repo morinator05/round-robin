@@ -3,6 +3,9 @@
 Routes only parse input, call a service and render or redirect; the rules live in
 `app/services/`. Every form POST answers with a redirect (303), so reloading the page
 doesn't submit the form again.
+
+Only the login and logout (`public`) work without a session. Every route on `router`
+requires a login, also new ones, so nothing personal is visible to the rest of the network.
 """
 
 from datetime import date, timedelta
@@ -10,7 +13,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
@@ -20,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.deps import AdminUser, CurrentUser, OptionalUser, Session
+from app.deps import AdminUser, CurrentUser, OptionalUser, Session, require_user
 from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, carpool, duties, jobs, strikes, users
@@ -28,7 +31,8 @@ from app.services.duties import DutyError
 from app.services.login_throttle import login_throttle
 from app.services.users import UserError
 
-router = APIRouter()
+public = APIRouter()
+router = APIRouter(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
@@ -104,8 +108,18 @@ def redirect(url: str) -> RedirectResponse:
 
 
 def safe_next(url: str | None) -> str:
-    """`url` if it's a path on this site, else "/". Stops redirects to other sites."""
-    if url and url.startswith("/") and not url.startswith("//"):
+    """`url` if it's a path on this site, else "/". Stops redirects to other sites.
+
+    Browsers read `\\` like `/` and skip tabs and line breaks, so `/\\evil.com` would
+    leave the site too.
+    """
+    if (
+        url
+        and url.startswith("/")
+        and not url.startswith("//")
+        and "\\" not in url
+        and url.isprintable()
+    ):
         return url
     return "/"
 
@@ -143,7 +157,7 @@ def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
 # --- auth -------------------------------------------------------------------
 
 
-@router.get("/login")
+@public.get("/login")
 async def login_page(request: Request, user: OptionalUser, next: str = "/"):
     """Login form; `next` is where to go after logging in."""
     if user:
@@ -151,7 +165,7 @@ async def login_page(request: Request, user: OptionalUser, next: str = "/"):
     return render(request, "login.html", None, next=next)
 
 
-@router.post("/login")
+@public.post("/login")
 async def login(
     request: Request,
     session: Session,
@@ -162,13 +176,12 @@ async def login(
     """Log in. Too many failed attempts block the username from that IP for a while."""
     client_ip = request.client.host if request.client else "unknown"
     throttle_key = f"{username.strip().lower()}@{client_ip}"
-    if login_throttle.is_blocked(throttle_key):
-        flash(request, "Too many failed attempts, please try again in 15 minutes", "error")
+    if not login_throttle.try_attempt(throttle_key):
+        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
         return redirect(f"/login?next={safe_next(next)}")
 
     user = await auth.authenticate(session, username, password)
     if user is None:
-        login_throttle.record_failure(throttle_key)
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
@@ -176,7 +189,7 @@ async def login(
     return redirect(safe_next(next))
 
 
-@router.post("/logout")
+@public.post("/logout")
 async def logout(request: Request):
     """Log out."""
     request.session.clear()
@@ -188,9 +201,9 @@ async def logout(request: Request):
 
 @router.get("/")
 async def dashboard(
-    request: Request, session: Session, user: OptionalUser, cleaner: str | None = None
+    request: Request, session: Session, user: CurrentUser, cleaner: str | None = None
 ):
-    """Today's duties and the preview; visible without login.
+    """Today's duties and the preview.
 
     While nobody has driven today's kitchen trip, the preview has one plan per potential
     driver; `cleaner` picks which one is shown (default: yourself if you're one of them,
@@ -219,7 +232,7 @@ async def dashboard(
     # Lenient: anything that isn't one of the choices (also "abc") shows the default.
     chosen = int(cleaner) if cleaner and cleaner.isdigit() else None
     if chosen not in kitchen_preview.plans:
-        chosen = user.id if user and user.id in choices else next(iter(kitchen_preview.plans))
+        chosen = user.id if user.id in choices else next(iter(kitchen_preview.plans))
     kitchen_plan = kitchen_preview.plans[chosen]
     # The open trip's potential drivers who aren't up again within the plan (usually
     # whoever cleans): said below it, so nobody wonders where they went.
@@ -337,15 +350,22 @@ async def change_password(
     old_password: Annotated[str, Form()],
     new_password: Annotated[str, Form()],
 ):
-    """Change your own password."""
-    if not auth.verify_password(old_password, user.password_hash):
+    """Change your own password. Wrong old passwords are limited like logins."""
+    throttle_key = f"password-change:{user.id}"
+    if not login_throttle.try_attempt(throttle_key):
+        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
+    elif not await auth.verify_password_off_loop(old_password, user.password_hash):
         flash(request, "Old password is wrong", "error")
-    elif len(new_password) < auth.MIN_PASSWORD_LENGTH:
-        flash(request, auth.PASSWORD_TOO_SHORT, "error")
     else:
-        user.password_hash = auth.hash_password(new_password)
-        await session.commit()
-        flash(request, "Password changed")
+        # The old password was right, so the attempt doesn't count, even if the new one
+        # is too short.
+        login_throttle.reset(throttle_key)
+        if len(new_password) < auth.MIN_PASSWORD_LENGTH:
+            flash(request, auth.PASSWORD_TOO_SHORT, "error")
+        else:
+            user.password_hash = auth.hash_password(new_password)
+            await session.commit()
+            flash(request, "Password changed")
     return redirect("/me")
 
 
@@ -385,8 +405,8 @@ async def history(request: Request, session: Session, user: CurrentUser, until: 
 
 
 @router.get("/stats")
-async def stats(request: Request, session: Session, user: OptionalUser):
-    """Per resident: duties driven and missed, score and strikes; visible without login."""
+async def stats(request: Request, session: Session, user: CurrentUser):
+    """Per resident: duties driven and missed, score and strikes."""
     all_users = await users.list_users(session)
     balances = {d: await duties.load_balances(session, d) for d in Duty}
     rows = (
@@ -425,8 +445,8 @@ async def stats(request: Request, session: Session, user: OptionalUser):
 
 
 @router.get("/help")
-async def help_page(request: Request, user: OptionalUser):
-    """How the duties work, for new residents; visible without login."""
+async def help_page(request: Request, user: CurrentUser):
+    """How the duties work, for new residents."""
     return render(
         request,
         "help.html",

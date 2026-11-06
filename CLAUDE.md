@@ -85,7 +85,9 @@ current/upcoming trips and chooses replacements.
   They raise `DutyError` / `UserError` with an English, user-facing message.
 - `app/web.py`: all routes. They parse input, call a service, commit, and turn the
   service errors into a session flash. Every POST answers with a 303 redirect. htmx
-  requests are detected via the `HX-Request` header.
+  requests are detected via the `HX-Request` header. New routes go on `router`, which
+  requires a login for every route; only login/logout are on `public`. Nothing with
+  personal data may be visible without a login (`test_every_page_needs_a_login`).
 - `app/deps.py`: `Session`, `OptionalUser`, `CurrentUser`, `AdminUser` are `Annotated`
   route parameter types; `CurrentUser` raises `LoginRequired`, which `main.py` turns into a
   redirect to `/login`.

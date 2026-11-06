@@ -76,12 +76,16 @@ deleted) are replaced on their open duties immediately.
 
 ## Pages
 
+Everything except the login page needs a login, so nobody else on the network sees names,
+rooms or duties.
+
 | Page | Access | Content |
 |---|---|---|
-| Overview | public | Today's duties, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
-| Statistics | public | Per resident: done, missed, points (score × 100), strikes |
+| Overview | login | Today's duties, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
+| Statistics | login | Per resident: done, missed, points (score × 100), strikes |
 | History | login | Duty history, 4 weeks per page |
 | My profile | login | Absences, strikes, recent duties, password |
+| How it works | login | The rules, for new residents |
 | Admin | floor speaker | Admin functions |
 
 ## Settings

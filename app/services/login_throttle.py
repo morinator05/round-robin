@@ -32,6 +32,17 @@ class LoginThrottle:
         """True after `max_failures` failed attempts within the last `window_seconds`."""
         return len(self._recent_failures(key)) >= self._max_failures
 
+    def try_attempt(self, key: str) -> bool:
+        """False if blocked; otherwise counts the attempt as failed until `reset`.
+
+        Counting it before the password check (not after) matters: the check awaits, and
+        meanwhile many more guesses could get past `is_blocked`.
+        """
+        if self.is_blocked(key):
+            return False
+        self.record_failure(key)
+        return True
+
     def record_failure(self, key: str) -> None:
         """Remember a failed attempt now."""
         self._failures.setdefault(key, []).append(self._clock())

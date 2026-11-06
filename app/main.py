@@ -3,11 +3,12 @@
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -16,7 +17,7 @@ from app.db import SessionLocal
 from app.deps import LoginRequired
 from app.services import users
 from app.services.jobs import scheduled_tick
-from app.web import router
+from app.web import public, router
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -46,7 +47,14 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown()
 
 
-app = FastAPI(title=f"Round Robin {settings.floor_name}".strip(), lifespan=lifespan)
+# No /docs, /redoc or /openapi.json: they would list every route to anyone on the network.
+app = FastAPI(
+    title=f"Round Robin {settings.floor_name}".strip(),
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -54,7 +62,39 @@ app.add_middleware(
     same_site="lax",
     max_age=60 * 60 * 24 * 90,  # stay logged in for 90 days
 )
+
+
+@app.middleware("http")
+async def refuse_cross_site_posts(request: Request, call_next):
+    """CSRF protection: only this site's own pages may send forms here.
+
+    SameSite=Lax alone isn't enough: to the browser, other ports on the same host and
+    sibling subdomains are the "same site". Browsers say where a request comes from in
+    `Sec-Fetch-Site`, older ones only in `Origin`; requests without either (scripts, very
+    old browsers) carry no session cookie from another site anyway.
+    """
+    if request.method == "POST":
+        fetch_site = request.headers.get("sec-fetch-site")
+        origin = request.headers.get("origin")
+        if fetch_site is not None and fetch_site not in ("same-origin", "none"):
+            return PlainTextResponse("Cross-site request refused", status_code=403)
+        if origin is not None and urlsplit(origin).netloc != request.headers.get("host"):
+            return PlainTextResponse("Cross-site request refused", status_code=403)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def no_caching_of_pages(request: Request, call_next):
+    """Pages hold personal data: the browser must not keep them, e.g. for Back after
+    logging out on a shared computer. Static files have nothing personal."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.include_router(public)
 app.include_router(router)
 
 
