@@ -264,6 +264,63 @@ async def test_preview_has_one_plan_per_open_potential_driver(session):
     assert after[None] == before[p1.id]
 
 
+async def test_undo_reopens_the_trip_for_everyone(session):
+    people = await make_users(session)
+    _, first, second, p1, p2 = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+
+    await duties.undo_driver(session, first, p1, at(MONDAY, 20) + timedelta(minutes=9))
+    assert first.status is second.status is Status.pending
+    assert first.completed_at is None and first.completed_by_id is None
+    # Open again: either of them can mark it, and the preview has a plan per person again.
+    assert duties.can_mark_as_driver(second, p2, at(MONDAY, 21))
+    preview = await duties.preview(
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=14), MONDAY
+    )
+    assert set(preview.plans) == {p1.id, p2.id}
+
+
+async def test_undo_is_only_for_a_short_while_and_for_whoever_marked_it(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, p2 = await kitchen_pair(session, people)
+    marked = at(MONDAY, 20)
+    await duties.mark_as_driver(session, first, p1, marked)
+
+    late = marked + timedelta(minutes=duties.UNDO_MINUTES + 1)
+    assert not duties.can_undo(first, p1, late)
+    with pytest.raises(DutyError):
+        await duties.undo_driver(session, first, p1, late)
+    # Not the partner, who didn't mark it; the floor speaker may.
+    assert not duties.can_undo(first, p2, marked + timedelta(minutes=1))
+    assert duties.can_undo(first, admin, marked + timedelta(minutes=1))
+
+
+async def test_no_undo_after_the_deadline(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    deadline = duties.deadline(first.trip)
+    await duties.mark_as_driver(session, first, p1, deadline - timedelta(minutes=2))
+    assert not duties.can_undo(first, p1, deadline)
+    assert not duties.can_undo(first, admin, deadline + timedelta(minutes=1))
+
+
+async def test_no_undo_of_a_disputed_trip(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, second, p1, p2 = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await duties.dispute(session, first, admin, at(MONDAY, 20) + timedelta(minutes=1))
+    # The admin marks the partner as the one who cleaned; that can't be undone (a strike is
+    # involved on this trip).
+    await duties.mark_as_driver(session, second, admin, at(MONDAY, 20) + timedelta(minutes=2))
+    assert not duties.can_undo(second, admin, at(MONDAY, 20) + timedelta(minutes=3))
+
+
 async def test_day_is_chosen_only_after_the_previous_deadline(session):
     await make_users(session)
     hour = settings.deadline_hour
@@ -1287,6 +1344,90 @@ async def test_done_on_the_card_updates_card_and_preview(session, client):
     assert 'id="kitchen-preview"' in r.text and "The plan depends on" not in r.text
 
 
+def you_line(page: str) -> str:
+    """The "you" summary at the top of the dashboard, whitespace collapsed."""
+    return " ".join(page.split('id="you"')[1].split("</p>")[0].split())
+
+
+async def test_dashboard_says_what_you_have_to_do(session, client):
+    people = await make_users(session, n=6)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    trash = await duties.get_trip(session, Duty.trash, settings.today())
+    busy = {p1.id, p2.id} | {pd.user_id for pd in trash.potential_drivers}
+    outsider = next(p for p in people if p.id not in busy and not p.is_admin)
+
+    await login(client, p1.username)
+    page = (await client.get("/")).text
+    line = you_line(page)
+    assert "You're on kitchen duty today" in line
+    # The card says what to do and by when, to the pair.
+    assert "One of you cleans" in page and "taps Done by" in page
+    assert "New here?" not in line
+
+    await client.post("/logout")
+    await login(client, outsider.username)
+    page = (await client.get("/")).text
+    line = you_line(page)
+    assert "You're free today" in line and "Next kitchen:" in line and "Next trash:" in line
+    assert "strike" not in line
+    # Someone who has never been on a duty gets pointed to the explanation.
+    assert "New here?" in line and 'href="/help"' in line
+    assert "One of them cleans" in page
+
+    await strikes.issue(session, user_id=outsider.id, reason="test", today=settings.today())
+    await session.commit()
+    line = you_line((await client.get("/")).text)
+    assert f"1 of {settings.strike_threshold} strikes" in line and 'href="/me"' in line
+
+    # After cleaning: thanks, also when you're on trash duty this week as well.
+    await client.post("/logout")
+    await login(client, p1.username)
+    mine = first if first.user_id == p1.id else second
+    await client.post(f"/potential-drivers/{mine.id}/drove")
+    assert "You did kitchen duty today – thanks!" in you_line((await client.get("/")).text)
+
+
+async def test_undo_on_the_card(session, client):
+    people = await make_users(session, n=6)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await login(client, p1.username)
+    card = {"HX-Request": "true"}
+    page = (
+        await client.post(
+            f"/potential-drivers/{first.id}/drove?card=1", headers=card, follow_redirects=True
+        )
+    ).text
+    undo = f'hx-post="/potential-drivers/{first.id}/undo?card=1"'
+    assert undo in page
+    r = await client.post(
+        f"/potential-drivers/{first.id}/undo?card=1", headers=card, follow_redirects=True
+    )
+    # Open again: the Done buttons are back and the plan depends on who cleans again.
+    assert undo not in r.text and f"/potential-drivers/{first.id}/drove?card=1" in r.text
+    assert "The plan depends on" in r.text
+
+    # The partner sees no Undo for someone else's Done, and can't undo it.
+    await client.post(f"/potential-drivers/{first.id}/drove?card=1", headers=card)
+    await client.post("/logout")
+    await login(client, p2.username)
+    assert undo not in (await client.get("/")).text
+    r = await client.post(f"/potential-drivers/{first.id}/undo?card=1", headers=card)
+    assert r.headers["HX-Refresh"] == "true"
+
+
+async def test_admin_can_undo_a_done_on_the_admin_page(session, client):
+    people = await make_users(session, n=6)
+    _, first, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    await client.post(f"/potential-drivers/{first.id}/drove?next=/admin")
+    undo = f'action="/potential-drivers/{first.id}/undo?next=/admin'
+    assert undo in (await client.get("/admin")).text
+    r = await client.post(f"/potential-drivers/{first.id}/undo?next=/admin")
+    assert r.status_code == 303
+    page = (await client.get(r.headers["location"])).text
+    assert "Undone: the duty is open again" in page and undo not in page
+
+
 async def test_preview_with_one_driver_left_has_no_switch(session):
     people = await make_users(session)
     _, first, _, _, p2 = await kitchen_pair(session, people)
@@ -1743,14 +1884,18 @@ async def test_dishwasher_pages(session, client, monkeypatch):
 
     await login(client, "p2")
     page = text(await client.get("/"))
-    assert "I emptied it" in page
+    assert 'hx-post="/dishwasher?card=1"' in page
     assert "has no kitchen duty in" in page and "dishwasher hero</span>" in page
+    # Says what it's for to someone who hasn't emptied it yet.
+    assert "Optional: the 2 who empty it most get next month off kitchen duty" in page
     # The card swaps itself, like "Done".
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.status_code == 303 and r.headers["location"] == "/"
     page = text(await client.get("/"))
-    assert 'badge s-drove">done' in page and "The next one counts from" in page
-    assert "You emptied it once this month" in page and "I emptied it" not in page
+    # While it can't be marked, the button stays but is disabled (no "done" tag to tap on).
+    assert "disabled>I emptied it</button>" in page and "Can be marked again from" in page
+    assert 'hx-post="/dishwasher?card=1"' not in page and 'badge s-drove">done' not in page
+    assert "You emptied it once this month" in page and "Optional:" not in page
     # Too soon: the page reloads to show why.
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.headers.get("hx-refresh") == "true"
@@ -1765,7 +1910,8 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     await client.post("/logout")
     await login(client, "p3")
     page = text(await client.get("/"))
-    assert "You have no kitchen duty in" in page and 'badge s-rode">not needed' in page
+    assert "You have no kitchen duty in" in page and "disabled>I emptied it</button>" in page
+    assert 'badge s-rode">not needed' not in page
     assert "You have no kitchen duty in" in text(await client.get("/me"))
 
     await users.set_active(session, people[3], False, settings.now())

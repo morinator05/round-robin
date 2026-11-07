@@ -17,9 +17,9 @@
       <div class="person">
         <div class="name">{{ person(pd.user) }}</div>
         {% if can_mark_as_driver(pd) %}
-          <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
+          <button class="primary" hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
-                  hx-select-oob="#kitchen-preview,#trash-preview" hx-swap="outerHTML">Done</button>
+                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">Done</button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
@@ -28,11 +28,24 @@
     {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
     {% if driver %}
       <p class="muted foot">Done by {{ person(driver.user) }}
-        on {{ driver.completed_at|date_time }}</p>
+        on {{ driver.completed_at|date_time }}
+        {% if can_undo is defined and can_undo(driver) %}·
+          <button class="link" hx-post="/potential-drivers/{{ driver.id }}/undo?card=1"
+                  hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
+                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">Undo</button>
+        {% endif %}</p>
     {% elif trip.potential_drivers|selectattr("disputed_at")|first %}
       <p class="muted foot">Disputed – the floor speaker decides who gets the credit</p>
     {% else %}
-      <p class="muted foot">Mark as done by {{ deadline|date_time }}</p>
+      {# What to do and by when; "you" for the people on it. #}
+      {% set mine = user and trip.potential_drivers|selectattr("user_id", "equalto", user.id)|list %}
+      {% set by = (deadline|weekday) ~ " " ~ (deadline|short_date) ~ ", " ~ (deadline|clock) %}
+      <p class="muted foot">
+        {%- if trip.potential_drivers|length > 1 %}
+          {%- if mine %}One of you cleans – whoever does taps Done by {{ by }}.
+          {%- else %}One of them cleans and taps Done by {{ by }}.{% endif %}
+        {%- elif mine %}{{ "Take out the trash this week" if duty == Duty.trash else "Clean the kitchen" }}, then tap Done by {{ by }}.
+        {%- else %}To be marked done by {{ by }}.{% endif %}</p>
     {% endif %}
   {% endif %}
 </section>

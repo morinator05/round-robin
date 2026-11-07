@@ -2,11 +2,36 @@
 {% block title %}Overview – {{ super() }}{% endblock %}
 {% block content %}
 <h1 class="date">{{ today|weekday }} {{ today|short_date }}</h1>
+{# What this means for you, in one line: now, next, strikes. Dates keep together when the
+   line wraps. #}
+{% set y = you %}
+{% macro dayname(e) %}<span class="nowrap">{{ e.start|weekday }} {{ e.start|short_date }}</span>{% endmacro %}
+<p class="you" id="you">
+  <strong class="part">
+  {%- if y.inactive %}You're inactive and won't be assigned any duties.
+  {%- elif not (y.kitchen_now or y.kitchen_done or y.trash_now or y.trash_done) %}You're free today.
+  {%- else %}
+    {%- if y.kitchen_now %}You're on kitchen duty {{ y.kitchen_day or "" }}.
+    {%- elif y.kitchen_done %}You did kitchen duty {{ y.kitchen_day or "" }} – thanks!{% endif %}
+    {% if y.trash_now %}You're on trash duty this week.
+    {%- elif y.trash_done %}You did trash duty this week – thanks!{% endif %}
+  {%- endif -%}
+  </strong>
+  {% if not y.inactive %}
+    <span class="part">Next kitchen: {% if y.kitchen_next %}{{ dayname(y.kitchen_next) }}{% else %}not in the next {{ preview_days }} days{% endif %}
+    {%- for a in y.kitchen_alternatives %}
+      ({% if a.entry %}{{ dayname(a.entry) }}{% else %}later{% endif %} if {% if a.is_me %}you clean{% else %}{{ person(a.cleaner) }} cleans{% endif %})
+    {%- endfor %}</span>
+    <span class="part">Next trash: {% if y.trash_next %}<span class="nowrap">{{ y.trash_next.start|short_date }}–{{ y.trash_next.end|short_date }}</span>{% else %}not in the next {{ preview_days }} days{% endif %}</span>
+  {%- endif %}
+  {% if y.strikes %}<a class="part" href="/me">{{ y.strikes }} of {{ strike_threshold }} strikes</a>{% endif %}
+  {% if y.is_new %}<span class="part">New here? <a href="/help">Read How it works</a></span>{% endif %}
+</p>
 <div class="grid duties">
-  {% with trip=kitchen.trip, duty=kitchen.duty, day=kitchen.day, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver %}
+  {% with trip=kitchen.trip, duty=kitchen.duty, day=kitchen.day, deadline=kitchen.deadline, can_mark_as_driver=kitchen.can_mark_as_driver, can_undo=kitchen.can_undo %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
-  {% with trip=trash.trip, duty=trash.duty, deadline=trash.deadline, can_mark_as_driver=trash.can_mark_as_driver %}
+  {% with trip=trash.trip, duty=trash.duty, deadline=trash.deadline, can_mark_as_driver=trash.can_mark_as_driver, can_undo=trash.can_undo %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
   {% include "partials/dishwasher_card.html" %}

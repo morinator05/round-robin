@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from markupsafe import Markup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -180,6 +180,7 @@ def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
         "can_mark_as_driver": (
             lambda pd: user is not None and duties.can_mark_as_driver(pd, user, now)
         ),
+        "can_undo": lambda pd: user is not None and duties.can_undo(pd, user, now),
     }
 
 
@@ -280,11 +281,16 @@ async def dashboard(
     # whoever cleans): said below it, so nobody wonders where they went.
     shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
     later = [people[uid] for uid in choices if uid not in shown and uid in people]
+    kitchen_card = duty_card_ctx(kitchen, Duty.kitchen, user)
+    trash_plan = next(iter(trash_preview.plans.values()))
     return render(
         request,
         "dashboard.html",
         user,
-        kitchen=duty_card_ctx(kitchen, Duty.kitchen, user),
+        you=await you_ctx(
+            session, user, kitchen_card, trash, kitchen_preview, chosen, trash_plan, people
+        ),
+        kitchen=kitchen_card,
         trash=duty_card_ctx(trash, Duty.trash, user),
         kitchen_plan=kitchen_plan,
         kitchen_choices=[people[uid] for uid in choices if uid in people],
@@ -292,10 +298,65 @@ async def dashboard(
         kitchen_open_start=kitchen_preview.open_start,
         yesterday=today - timedelta(days=1),
         kitchen_later=later,
-        trash_plan=next(iter(trash_preview.plans.values())),
+        trash_plan=trash_plan,
+        preview_days=settings.preview_days,
         users_by_id=people,
         dishwasher=dishwasher_card,
     )
+
+
+def _next_in(plan: list[duties.PreviewEntry], user_id: int) -> duties.PreviewEntry | None:
+    """The user's first trip in a preview plan, if they are in it."""
+    return next((e for e in plan if user_id in e.potential_drivers), None)
+
+
+async def you_ctx(
+    session: AsyncSession,
+    user: User,
+    kitchen_card: dict,
+    trash: Trip | None,
+    kitchen_preview: duties.Preview,
+    chosen: int | None,
+    trash_plan: list[duties.PreviewEntry],
+    people: dict[int, User],
+) -> dict:
+    """The "you" line at the top of the dashboard: your duties now, your next ones, your
+    strikes, and a pointer to the help for someone who has never had a duty."""
+
+    def has(trip: Trip | None, status: Status) -> bool:
+        """Whether the user is on `trip` with `status`."""
+        return trip is not None and any(
+            pd.user_id == user.id and pd.status is status for pd in trip.potential_drivers
+        )
+
+    kitchen_next = _next_in(kitchen_preview.plans[chosen], user.id)
+    # Who comes up next depends on who cleans the open trip: name the other outcomes for
+    # you if they'd move your next kitchen day.
+    alternatives = []
+    for uid, plan in kitchen_preview.plans.items():
+        other = _next_in(plan, user.id)
+        if uid not in (None, chosen) and (other and other.start) != (
+            kitchen_next and kitchen_next.start
+        ):
+            alternatives.append(
+                {"entry": other, "cleaner": people.get(uid), "is_me": uid == user.id}
+            )
+    history = await session.scalar(
+        select(func.count(PotentialDriver.id)).where(PotentialDriver.user_id == user.id)
+    )
+    return {
+        "inactive": not user.active,
+        "kitchen_now": has(kitchen_card["trip"], Status.pending),
+        "kitchen_done": has(kitchen_card["trip"], Status.drove),
+        "kitchen_day": kitchen_card["day"],
+        "trash_now": has(trash, Status.pending),
+        "trash_done": has(trash, Status.drove),
+        "kitchen_next": kitchen_next,
+        "kitchen_alternatives": alternatives,
+        "trash_next": _next_in(trash_plan, user.id),
+        "strikes": len(await strikes.active_strikes(session, user.id)),
+        "is_new": not history,
+    }
 
 
 async def dishwasher_ctx(
@@ -379,6 +440,27 @@ async def mark_as_driver(
     if card:
         return redirect("/")
     flash(request, "Marked as done")
+    return redirect(safe_next(request.query_params.get("next")))
+
+
+@router.post("/potential-drivers/{potential_driver_id}/undo")
+async def undo_driver(
+    request: Request, session: Session, user: CurrentUser, potential_driver_id: int
+):
+    """Take back a mis-tapped "Done", from the dashboard card or the admin page."""
+    card = is_card_request(request)
+    try:
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.undo_driver(session, pd, user, settings.now())
+        await session.commit()
+    except DutyError as e:
+        flash(request, str(e), "error")
+        if card:
+            return Response(headers={"HX-Refresh": "true"})
+        return redirect(safe_next(request.query_params.get("next")))
+    if card:
+        return redirect("/")
+    flash(request, "Undone: the duty is open again")
     return redirect(safe_next(request.query_params.get("next")))
 
 
@@ -606,6 +688,7 @@ async def help_page(request: Request, user: CurrentUser):
 @router.get("/admin")
 async def admin(request: Request, session: Session, user: AdminUser):
     """admin page: residents, strikes and recent duties."""
+    now = settings.now()
     all_users = await users.list_users(session)
     since = settings.today() - timedelta(days=14)
     trips = await session.scalars(
@@ -636,6 +719,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         strikes=list(all_strikes),
         aways=list(aways),
         dishwasher_clears=await dishwasher.clears_in_month(session, settings.today()),
+        can_undo=lambda pd: duties.can_undo(pd, user, now),
     )
 
 

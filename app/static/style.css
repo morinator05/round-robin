@@ -108,6 +108,11 @@ nav form { margin: 0; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
+/* Overview: what it means for you, right under the date. */
+.you { margin: -.25rem 0 1.25rem; display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; }
+.you .nowrap { white-space: nowrap; }
+/* "Undo" in a card's last line: a small text button, not another big box. */
+.duty .foot button.link { padding: 0 .2rem; font-size: inherit; color: var(--accent); }
 /* My profile: the two dates share the card's width, "Add" stays as wide as its text. */
 .away-form label { flex: 1 1 9rem; }
 .away-form input { width: 100%; }
@@ -141,16 +146,15 @@ h1.date { font-variant-numeric: tabular-nums; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-/* --- Status tags. Same box as a button, so status and button line up next to each other.
-   Tags are flat with a light frame in their own colour, buttons have a stronger accent
-   frame and are slightly raised, so it's clear which one can be clicked. */
+/* --- Status tags. Same size as a button, so status and button line up next to each other,
+   but flat: a tinted fill without a frame or shadow, in normal weight. Buttons are framed,
+   bold and raised, the main ones solid, so it's clear which one can be clicked. */
 .badge { display: inline-block; padding: .4rem .9rem .3rem; font: inherit; font-size: .9rem;
-         line-height: 1.5; border: 1px solid var(--neutral-line); white-space: nowrap;
+         line-height: 1.5; border: 1px solid transparent; white-space: nowrap;
          text-align: center; color: var(--neutral); background: var(--neutral-soft); }
-.s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line);
-           font-weight: 600; }
-.s-pending { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
-.s-missed { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+.s-drove { color: var(--ok); background: var(--ok-soft); font-weight: 600; }
+.s-pending { color: var(--warn); background: var(--warn-soft); }
+.s-missed { color: var(--bad); background: var(--bad-soft); }
 /* Every tag, and every button at the end of a line (in a list of people or a table's .end
    column), is as wide as the longest tag ("not needed"), whatever the font: an invisible,
    zero-height copy of it sets the width. Bold, so the buttons' heavier text fits as well. */
@@ -172,6 +176,12 @@ button { font: inherit; font-size: .9rem; line-height: 1.5; font-weight: 700;
          transition: background-color .15s, border-color .15s; }
 button:hover { border-color: var(--accent); }
 button:active { transform: translateY(1px); box-shadow: none; }
+/* The one thing to do on a card ("Done", "I emptied it"): solid. */
+button.primary { background: var(--accent); color: var(--card); border-color: var(--accent); }
+button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+button:disabled, button:disabled:hover { opacity: .45; cursor: default; transform: none;
+                                         box-shadow: none; }
+button.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
 button.secondary { background: var(--card); color: var(--accent); border-color: var(--border-strong); }
 button.secondary:hover { background: var(--card-alt); border-color: var(--accent); }
 button.danger { background: var(--card); color: var(--bad); border-color: var(--bad-line); }

@@ -7,12 +7,12 @@
   <div class="person">
     <div class="name">{{ person(user) }}</div>
     {% if d.state == "can_mark" %}
-      <button hx-post="/dishwasher?card=1" hx-target="#card-dishwasher" hx-select="#card-dishwasher"
-              hx-swap="outerHTML">I emptied it</button>
-    {% elif d.state == "done" %}
-      <span class="badge s-drove">done</span>
-    {% elif d.state == "not_needed" %}
-      <span class="badge s-rode">not needed</span>
+      <button class="primary" hx-post="/dishwasher?card=1" hx-target="#card-dishwasher"
+              hx-select="#card-dishwasher" hx-swap="outerHTML">I emptied it</button>
+    {% elif d.state in ("done", "not_needed") %}
+      {# Just emptied (by you or someone else): the same button, but it can't be pressed
+         until the next one counts (said below). #}
+      <button class="primary" disabled>I emptied it</button>
     {% else %}
       <span class="badge">inactive</span>
     {% endif %}
@@ -21,7 +21,8 @@
     {% if d.last %}Last emptied by {{ person(d.last.user) }}
       {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}.
     {%- else %}Nobody has emptied it yet.{% endif %}
-    {% if d.next_allowed and d.state != "inactive" %}The next one counts from {{ d.next_allowed|clock }}.{% endif %}
-    {% if d.mine %}You emptied it {{ "once" if d.mine == 1 else d.mine ~ " times" }} this month.{% endif %}
+    {% if d.next_allowed and d.state != "inactive" %}Can be marked again from {{ d.next_allowed|clock }}.{% endif %}
+    {% if d.mine %}You emptied it {{ "once" if d.mine == 1 else d.mine ~ " times" }} this month.
+    {%- elif d.state != "inactive" %}Optional: the {{ dishwasher_heroes }} who empty it most get next month off kitchen duty.{% endif %}
   </p>
 </section>

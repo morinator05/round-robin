@@ -149,6 +149,10 @@
               <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
                 <button class="secondary">Done</button></form>
             {% endif %}
+            {% if can_undo(pd) %}
+              <form method="post" action="/potential-drivers/{{ pd.id }}/undo?next=/admin" class="inline">
+                <button class="secondary">Undo</button></form>
+            {% endif %}
             {% if pd.status == Status.drove %}
               <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
                     hx-confirm="Marked done but not actually done? Gives a strike.">
