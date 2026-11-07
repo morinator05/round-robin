@@ -673,12 +673,13 @@ async def stats(request: Request, session: Session, user: CurrentUser):
 
 
 @router.get("/help")
-async def help_page(request: Request, user: CurrentUser):
+async def help_page(request: Request, session: Session, user: CurrentUser):
     """How the duties work, for new residents."""
     return render(
         request,
         "help.html",
         user,
+        floor_speakers=[u for u in await users.list_users(session) if u.is_admin],
         kitchen_people=settings.kitchen_people_per_day,
         trash_people=settings.trash_people_per_week,
         deadline_hour=settings.deadline_hour,

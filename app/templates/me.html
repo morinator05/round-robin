@@ -4,38 +4,7 @@
 <h1>{{ person(user) }}</h1>
 {% if not user.active %}<p class="flash error">You are inactive and won't be assigned any duties.</p>{% endif %}
 
-<div class="grid">
-  <section class="card">
-    <h2>Away {{ help_link("away") }}</h2>
-    <form method="post" action="/me/away" class="row away-form">
-      <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
-      <label>To <input type="date" name="end_date" required></label>
-      <button>Add</button>
-    </form>
-    <div class="away-list">
-    {% for a in aways %}
-      <div class="person">
-        <span>{{ a.start_date|long_date }}–{{ a.end_date|long_date }}</span>
-        <form method="post" action="/me/away/{{ a.id }}/delete" class="inline">
-          <button class="danger">Delete</button>
-        </form>
-      </div>
-    {% else %}
-      <p class="muted">Not away.</p>
-    {% endfor %}
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Change password</h2>
-    <form method="post" action="/me/password" class="row stack">
-      <label>Old password <input type="password" name="old_password" autocomplete="current-password" required></label>
-      <label>New password <input type="password" name="new_password" autocomplete="new-password" minlength="{{ min_password_length }}" required></label>
-      <button>Change</button>
-    </form>
-  </section>
-</div>
-
+{# What residents look for most first (strikes, away), the password last. #}
 {% set active = strikes|selectattr("is_active")|list %}
 <h2>Strikes {{ help_link("strikes") }} <span class="muted">{{ active|length }} active</span></h2>
 <div class="table-wrap"><table class="compact">
@@ -51,11 +20,39 @@
   {% else %}<tr><td class="muted" colspan="3">No strikes.</td></tr>{% endfor %}
 </table></div>
 
-<h2>Dishwasher {{ help_link("dishwasher") }} <span class="muted">{{ today|month_name }}</span></h2>
-{% if is_hero %}<p>You have no kitchen duty in {{ today|month_name }} as a
-  <span class="tag tag-hero">dishwasher hero</span> of {{ heroes_from|month_name }}.</p>{% endif %}
-{% if dishwasher_mine %}<p>You emptied it {{ "once" if dishwasher_mine == 1 else dishwasher_mine ~ " times" }} this month.</p>
-{% else %}<p class="muted">You haven't emptied it this month.</p>{% endif %}
+<div class="grid profile">
+  <section class="card">
+    <h2>Away {{ help_link("away") }}</h2>
+    <form method="post" action="/me/away" class="row away-form">
+      <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
+      <label>To <input type="date" name="end_date" required></label>
+      <button>Add</button>
+    </form>
+    <p class="muted note">You won't be picked while you're away. Duties you already have stay
+      yours; if you can't do one, ask the floor speaker to excuse it.</p>
+    <div class="away-list">
+    {% for a in aways %}
+      <div class="person">
+        <span>{{ a.start_date|long_date }}–{{ a.end_date|long_date }}</span>
+        <form method="post" action="/me/away/{{ a.id }}/delete" class="inline"
+              hx-confirm="Delete your absence from {{ a.start_date|short_date }} to {{ a.end_date|short_date }}? You can be picked again for those days.">
+          <button class="danger">Delete</button>
+        </form>
+      </div>
+    {% else %}
+      <p class="muted">Not away.</p>
+    {% endfor %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Dishwasher {{ help_link("dishwasher") }} <span class="muted">{{ today|month_name }}</span></h2>
+    {% if is_hero %}<p>You have no kitchen duty in {{ today|month_name }} as a
+      <span class="tag tag-hero">dishwasher hero</span> of {{ heroes_from|month_name }}.</p>{% endif %}
+    {% if dishwasher_mine %}<p>You emptied it {{ "once" if dishwasher_mine == 1 else dishwasher_mine ~ " times" }} this month.</p>
+    {% else %}<p class="muted">You haven't emptied it this month.</p>{% endif %}
+  </section>
+</div>
 
 <h2>My recent duties</h2>
 <div class="table-wrap"><table class="compact">
@@ -68,4 +65,13 @@
     </tr>
   {% else %}<tr><td class="muted" colspan="3">No duties yet.</td></tr>{% endfor %}
 </table></div>
+
+<section class="card password">
+  <h2>Change password</h2>
+  <form method="post" action="/me/password" class="row stack">
+    <label>Old password <input type="password" name="old_password" autocomplete="current-password" required></label>
+    <label>New password <input type="password" name="new_password" autocomplete="new-password" minlength="{{ min_password_length }}" required></label>
+    <button>Change</button>
+  </form>
+</section>
 {% endblock %}

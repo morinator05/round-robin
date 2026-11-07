@@ -116,6 +116,12 @@ h1.date { font-variant-numeric: tabular-nums; }
 /* My profile: the two dates share the card's width, "Add" stays as wide as its text. */
 .away-form label { flex: 1 1 9rem; }
 .away-form input { width: 100%; }
+/* The note under the away form; the profile's two cards; the password card, last and narrow. */
+.away-form + .note { margin: .6rem 0 0; font-size: .9rem; }
+.grid.profile { margin-top: 1.5rem; }
+.card.password { margin-top: 1.5rem; max-width: 32rem; }
+/* Under the statistics: what the points mean. */
+.legend { margin: .6rem 0 0; font-size: .9rem; }
 /* The away periods under the form. */
 .away-list { margin-top: .9rem; border-top: 1px solid var(--border); }
 .away-list .person:first-of-type { padding-top: .6rem; }

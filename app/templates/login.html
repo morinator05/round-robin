@@ -2,6 +2,8 @@
 {% block title %}Log in – {{ super() }}{% endblock %}
 {% block content %}
 <h1>Log in</h1>
+<p class="muted">Kitchen and trash duty{% if floor_name %} for {{ floor_name }}{% endif %}. Log in
+  with the account your floor speaker gave you.</p>
 <form method="post" action="/login" class="card row stack">
   <input type="hidden" name="next" value="{{ next }}">
   <label>Username <input name="username" autocomplete="username" required autofocus></label>

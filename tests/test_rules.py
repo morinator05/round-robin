@@ -1350,7 +1350,9 @@ def you_line(page: str) -> str:
     return " ".join(page.split('id="you"')[1].split("</p>")[0].split())
 
 
-async def test_dashboard_says_what_you_have_to_do(session, client):
+async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
+    # Noon: before the deadline hour the dashboard would still show yesterday's duty.
+    monkeypatch.setattr(type(settings), "now", lambda self: at(MONDAY, 12))
     people = await make_users(session, n=6)
     _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
     trash = await duties.get_trip(session, Duty.trash, settings.today())
@@ -1388,7 +1390,8 @@ async def test_dashboard_says_what_you_have_to_do(session, client):
     assert "You did kitchen duty today – thanks!" in you_line((await client.get("/")).text)
 
 
-async def test_undo_on_the_card(session, client):
+async def test_undo_on_the_card(session, client, monkeypatch):
+    monkeypatch.setattr(type(settings), "now", lambda self: at(MONDAY, 12))
     people = await make_users(session, n=6)
     _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
     await login(client, p1.username)
@@ -1781,6 +1784,34 @@ async def test_admin_folds_revoked_strikes(session, client):
     folded = page.split("1 revoked or used")[1].split("</details>")[0]
     assert "taken back" in folded and "still on" not in folded
     assert kept.reason in page
+
+
+async def test_newcomers_are_told_what_this_is_and_whom_to_ask(session, client):
+    await make_users(session, n=3)
+    login_page = text(await client.get("/login"))
+    assert "Log in with the account your floor speaker gave you" in login_page
+    await login(client, "p2")
+    help_page = html.unescape(text(await client.get("/help")))
+    # The pair rule spelled out, and who the floor speaker is.
+    assert "Agree who cleans" in help_page and "you both get a strike" in help_page
+    assert "Your floor speaker: Person" in help_page
+    stats = text(await client.get("/stats"))
+    assert "+100 points = one duty more than your fair share" in stats
+
+
+async def test_profile_puts_strikes_first_and_password_last(session, client):
+    people = await make_users(session, n=3)
+    later = settings.today() + timedelta(days=3)
+    await users.add_away(session, people[1], later, later, settings.today())
+    await session.commit()
+    await login(client, "p2")
+    page = html.unescape(text(await client.get("/me")))
+    order = [
+        page.index(h) for h in ("<h2>Strikes", "<h2>Away", "My recent duties", "Change password")
+    ]
+    assert order == sorted(order)
+    assert "Duties you already have stay yours" in page
+    assert 'hx-confirm="Delete your absence from' in page
 
 
 async def test_admin_sees_and_deletes_absences(session, client):
