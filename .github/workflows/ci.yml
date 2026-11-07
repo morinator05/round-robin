@@ -41,12 +41,12 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --locked
       # The migrations build the same schema as the models (tests use the models directly).
+      # Runs on the still empty test database; pytest recreates the schema afterwards.
       - name: Migrations
         env:
-          PGPASSWORD: e1
-          DATABASE_URL: postgresql+asyncpg://e1:e1@localhost:5432/e1_migrations
+          # The app's settings are loaded (for the database URL) and require a key.
+          SECRET_KEY: ci-only-secret-key-that-is-long-enough-0123456789
         run: |
-          createdb -h localhost -U e1 e1_migrations
           uv run alembic upgrade head
           uv run alembic check
       - run: uv run pytest
