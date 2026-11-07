@@ -2,12 +2,23 @@
 {% block title %}Statistics – {{ super() }}{% endblock %}
 {% block content %}
 <h1>Statistics {{ help_link("points") }}</h1>
+{# Where you stand, in words: 100 points are one duty. "On par" within a quarter duty. #}
+{% macro stand(p) -%}
+  {%- if p >= 25 %}{{ "%.1f"|format(p / 100) }} duties ahead
+  {%- elif p <= -25 %}{{ "%.1f"|format(-p / 100) }} duties behind – you're due soon
+  {%- else %}on par{% endif -%}
+{%- endmacro %}
+<p class="you" id="you">
+  <span class="part"><strong>Kitchen:</strong> {{ stand(you.points[Duty.kitchen]) }}</span>
+  <span class="part"><strong>Trash:</strong> {{ stand(you.points[Duty.trash]) }}</span>
+  <span class="part"><strong>Strikes:</strong> {{ you.strikes }} of {{ strike_threshold }}</span>
+</p>
 <div class="table-wrap"><table class="stats">
   <tr>
     {# What people look for first comes first, so it's visible on a phone without scrolling. #}
-    <th>Name</th><th class="num">Kitchen points</th><th class="num">Trash points</th><th class="num">Strikes</th>
-    <th class="num">Kitchen done</th><th class="num">Kitchen missed</th>
-    <th class="num">Trash done</th><th class="num">Penalty trash duties</th>
+    <th>Name</th><th class="num">Kitchen<span class="wide-only"> points</span></th><th class="num">Trash<span class="wide-only"> points</span></th><th class="num">Strikes</th>
+    <th class="num count">Kitchen done</th><th class="num count">Kitchen missed</th>
+    <th class="num count">Trash done</th><th class="num count">Penalty trash duties</th>
   </tr>
   {% for u in users %}
     <tr{% if not u.active %} class="muted"{% endif %}>
@@ -17,13 +28,14 @@
       {# Green without strikes, red one strike before the penalty week, orange in between. #}
       {% set n = active[u.id] %}
       <td class="strikes {{ 'ok' if n == 0 else ('bad' if n >= strike_threshold - 1 else 'warn') }}">{{ n }} / {{ strike_threshold }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
-      <td class="num">{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
+      <td class="num count">{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
+      <td class="num count">{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
+      <td class="num count">{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>
+      <td class="num count">{{ counts.get((u.id, Duty.trash, "penalty"), 0) }}</td>
     </tr>
   {% endfor %}
 </table></div>
+<p class="muted legend phone-only">More columns on a wider screen.</p>
 <p class="muted legend">+100 points = one duty more than your fair share; below 0 = you're
   due sooner. <a href="/help#points">How it's counted</a></p>
 
@@ -35,7 +47,7 @@
     <tr{% if not u.active %} class="muted"{% endif %}>
       <td>{{ person(u) }}{% if not u.active %} (inactive){% endif %}</td>
       <td class="num">{{ n }}</td>
-      <td class="end">{% if loop.index <= dishwasher_heroes %}<span class="tag tag-hero">hero in {{ heroes_month|month_name }}</span>{% endif %}</td>
+      <td class="end">{% if loop.index <= dishwasher_heroes %}<span class="tag tag-hero">on track for {{ heroes_month|month_name }}</span>{% endif %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">Nobody has emptied it this month yet.</td></tr>{% endfor %}
 </table></div>

@@ -19,7 +19,10 @@
         {% if can_mark_as_driver(pd) %}
           <button class="primary" hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
-                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">Done</button>
+                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">
+            {#- Your own: what you did. Someone else's (floor speaker): what the click does. #}
+            {{- "I cleaned it" if user and pd.user_id == user.id else "Mark done" -}}
+          </button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
@@ -42,10 +45,10 @@
       {% set by = (deadline|weekday) ~ " " ~ (deadline|short_date) ~ ", " ~ (deadline|clock) %}
       <p class="muted foot">
         {%- if trip.potential_drivers|length > 1 %}
-          {%- if mine %}One of you cleans – whoever does taps Done by {{ by }}.
-          {%- else %}One of them cleans and taps Done by {{ by }}.{% endif %}
-        {%- elif mine %}{{ "Take out the trash this week" if duty == Duty.trash else "Clean the kitchen" }}, then tap Done by {{ by }}.
-        {%- else %}To be marked done by {{ by }}.{% endif %}</p>
+          {%- if mine %}Only one of you needs to clean. Whoever does taps “I cleaned it” before {{ by }}.
+          {%- else %}Only one of them needs to clean, before {{ by }}.{% endif %}
+        {%- elif mine %}{{ "Take out the trash this week" if duty == Duty.trash else "Clean the kitchen" }}, then tap “I cleaned it” before {{ by }}.
+        {%- else %}To be done before {{ by }}.{% endif %}</p>
     {% endif %}
   {% endif %}
 </section>

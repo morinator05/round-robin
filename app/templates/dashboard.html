@@ -5,16 +5,22 @@
 {# What this means for you, in one line: now, next, strikes. Dates keep together when the
    line wraps. #}
 {% set y = you %}
-{% macro dayname(e) %}<span class="nowrap">{{ e.start|weekday }} {{ e.start|short_date }}</span>{% endmacro %}
+{# Before the deadline hour the cards still show yesterday's (last week's) duty, and the next
+   one starts later today: say "today from 08:05" rather than today's date. #}
+{% set starts = "%02d:05"|format(deadline_hour) %}
+{% macro dayname(e) %}<span class="nowrap">{% if e.start == today %}today from {{ starts }}{% else %}{{ e.start|weekday }} {{ e.start|short_date }}{% endif %}</span>{% endmacro %}
+{% set button = "“I cleaned it”" %}
 <p class="you" id="you">
   <strong class="part">
   {%- if y.inactive %}You're inactive and won't be assigned any duties.
   {%- elif not (y.kitchen_now or y.kitchen_done or y.trash_now or y.trash_done) %}You're free today.
   {%- else %}
-    {%- if y.kitchen_now %}You're on kitchen duty {{ y.kitchen_day or "" }}.
-    {%- elif y.kitchen_done %}You did kitchen duty {{ y.kitchen_day or "" }} – thanks!{% endif %}
-    {% if y.trash_now %}You're on trash duty this week.
-    {%- elif y.trash_done %}You did trash duty this week – thanks!{% endif %}
+    {%- if y.kitchen_now and y.kitchen_late %}Your kitchen duty from yesterday is still open – tap {{ button }} by {{ y.kitchen_deadline|clock }}.
+    {%- elif y.kitchen_now %}You're on kitchen duty today.
+    {%- elif y.kitchen_done %}You did kitchen duty {{ "yesterday" if y.kitchen_late else "today" }} – thanks!{% endif %}
+    {% if y.trash_now and y.trash_late %}Your trash duty from last week is still open – tap {{ button }} by {{ y.trash_deadline|clock }}.
+    {%- elif y.trash_now %}You're on trash duty this week.
+    {%- elif y.trash_done %}You did trash duty {{ "last week" if y.trash_late else "this week" }} – thanks!{% endif %}
   {%- endif -%}
   </strong>
   {% if not y.inactive %}
@@ -22,7 +28,7 @@
     {%- for a in y.kitchen_alternatives %}
       ({% if a.entry %}{{ dayname(a.entry) }}{% else %}later{% endif %} if {% if a.is_me %}you clean{% else %}{{ person(a.cleaner) }} cleans{% endif %})
     {%- endfor %}</span>
-    <span class="part">Next trash: {% if y.trash_next %}<span class="nowrap">{{ y.trash_next.start|short_date }}–{{ y.trash_next.end|short_date }}</span>{% else %}not in the next {{ preview_days }} days{% endif %}</span>
+    <span class="part">Next trash: {% if y.trash_next %}<span class="nowrap">{% if y.trash_next.start == today %}this week, from today {{ starts }}{% else %}{{ y.trash_next.start|short_date }}–{{ y.trash_next.end|short_date }}{% endif %}</span>{% else %}not in the next {{ preview_days }} days{% endif %}</span>
   {%- endif %}
   {% if y.strikes %}<a class="part" href="/me">{{ y.strikes }} of {{ strike_threshold }} strikes</a>{% endif %}
   {% if y.is_new %}<span class="part">New here? <a href="/help">Read How it works</a></span>{% endif %}

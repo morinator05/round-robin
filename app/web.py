@@ -349,7 +349,11 @@ async def you_ctx(
         "inactive": not user.active,
         "kitchen_now": has(kitchen_card["trip"], Status.pending),
         "kitchen_done": has(kitchen_card["trip"], Status.drove),
-        "kitchen_day": kitchen_card["day"],
+        # Before the deadline hour the cards show yesterday's / last week's duty.
+        "kitchen_late": kitchen_card["day"] == "yesterday",
+        "kitchen_deadline": kitchen_card["deadline"],
+        "trash_late": trash is not None and trash.end_date < settings.today(),
+        "trash_deadline": duties.deadline(trash) if trash else None,
         "trash_now": has(trash, Status.pending),
         "trash_done": has(trash, Status.drove),
         "kitchen_next": kitchen_next,
@@ -666,6 +670,10 @@ async def stats(request: Request, session: Session, user: CurrentUser):
             if s.user_id in by_id
         ],
         heroes_month=dishwasher.next_month(today),
+        you={
+            "points": {d: points[d].get(user.id, 0) for d in Duty},
+            "strikes": active.get(user.id, 0),
+        },
     )
 
 

@@ -120,7 +120,8 @@ h1.date { font-variant-numeric: tabular-nums; }
 .away-form + .note { margin: .6rem 0 0; font-size: .9rem; }
 .grid.profile { margin-top: 1.5rem; }
 .card.password { margin-top: 1.5rem; max-width: 32rem; }
-/* Under the statistics: what the points mean. */
+/* Under the statistics: what the points mean; a note that only shows on phones. */
+.phone-only { display: none; }
 .legend { margin: .6rem 0 0; font-size: .9rem; }
 /* The away periods under the form. */
 .away-list { margin-top: .9rem; border-top: 1px solid var(--border); }
@@ -152,10 +153,10 @@ h1.date { font-variant-numeric: tabular-nums; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-/* --- Status tags. Same size as a button, so status and button line up next to each other,
-   but flat: a tinted fill without a frame or shadow, in normal weight. Buttons are framed,
+/* --- Status tags. As wide as a button, so status and button line up under each other,
+   but lower, smaller and flat: a tinted fill without a frame or shadow, in normal weight. Buttons are framed,
    bold and raised, the main ones solid, so it's clear which one can be clicked. */
-.badge { display: inline-block; padding: .4rem .9rem .3rem; font: inherit; font-size: .9rem;
+.badge { display: inline-block; padding: .2rem .6rem .12rem; font: inherit; font-size: .8rem;
          line-height: 1.5; border: 1px solid transparent; white-space: nowrap;
          text-align: center; color: var(--neutral); background: var(--neutral-soft); }
 .s-drove { color: var(--ok); background: var(--ok-soft); font-weight: 600; }
@@ -362,11 +363,24 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   nav .brand { width: 100%; padding: .2rem .1rem; }
   .nav-links a { padding: .3rem .55rem .2rem; }
   .nav-user { margin-left: 0; width: 100%; }
-  /* History: narrower columns, a week's date may take two lines. */
-  table.history { min-width: 38rem; }
-  table.history .col-date { width: 6.5rem; }
-  table.history .col-action { width: 7.5rem; }
-  table.history td:first-child { white-space: normal; }
+  /* History: each duty stacked (date, who was on it, who marked it, Dispute on the right),
+     so nothing hides beyond the right edge. */
+  .table-wrap table.history { min-width: 0; table-layout: auto; }
+  table.history, table.history tbody { display: block; }
+  table.history colgroup, table.history tr:first-child:has(th) { display: none; }
+  table.history tr { display: grid; grid-template-columns: 1fr auto; align-items: start;
+                     gap: .3rem .6rem; padding: .6rem .7rem; }
+  table.history tr + tr { border-top: 1px solid var(--border); }
+  table.history td { display: block; padding: 0; border: 0; white-space: normal; }
+  table.history td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  table.history td:not(:first-child):not(.end) { grid-column: 1; }
+  table.history td.end { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+  /* Statistics: only the columns that matter most fit a phone; the counts are left out. */
+  table.stats .count, .wide-only { display: none; }
+  table.stats th, table.stats td { padding-left: .5rem; padding-right: .5rem; }
+  /* The header row is hidden, so the last line says what it is. */
+  table.history td:nth-child(3)::before { content: "Done by "; color: var(--muted); }
+  .phone-only { display: block; }
   .card .table-wrap table { min-width: 36rem; }
   /* Small tables (a date, a name or two, a tag or button) fit the screen instead: the
      date may take two lines and the cells are a bit narrower. */

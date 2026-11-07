@@ -1364,7 +1364,9 @@ async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
     line = you_line(page)
     assert "You're on kitchen duty today" in line
     # The card says what to do and by when, to the pair.
-    assert "One of you cleans" in page and "taps Done by" in page
+    assert "Only one of you needs to clean" in page and "taps “I cleaned it” before" in page
+    # Your own button says what it means; it isn't the "done" status word.
+    assert ">I cleaned it</button>" in page and ">Done</button>" not in page
     assert "New here?" not in line
 
     await client.post("/logout")
@@ -1375,7 +1377,7 @@ async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
     assert "strike" not in line
     # Someone who has never been on a duty gets pointed to the explanation.
     assert "New here?" in line and 'href="/help"' in line
-    assert "One of them cleans" in page
+    assert "Only one of them needs to clean" in page
 
     await strikes.issue(session, user_id=outsider.id, reason="test", today=settings.today())
     await session.commit()
@@ -1388,6 +1390,34 @@ async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
     mine = first if first.user_id == p1.id else second
     await client.post(f"/potential-drivers/{mine.id}/drove")
     assert "You did kitchen duty today – thanks!" in you_line((await client.get("/")).text)
+
+
+async def test_dashboard_at_night_talks_about_yesterday_and_today(session, client, monkeypatch):
+    """Before the deadline hour the card still shows yesterday's duty; the "you" line must
+    say so plainly, and call the duty that starts later today "today"."""
+    people = await make_users(session, n=6)
+    _, first, _, p1, p2 = await kitchen_pair(session, people)
+    tuesday = MONDAY + timedelta(days=1)
+    monkeypatch.setattr(type(settings), "now", lambda self: at(tuesday, 3))
+
+    await login(client, p1.username)
+    line = you_line((await client.get("/")).text)
+    assert "Your kitchen duty from yesterday is still open" in line and "by 08:00" in line
+    assert "duty yesterday." not in line
+
+    # Someone outside the pair who is up today (from the deadline hour on).
+    preview = await duties.preview(
+        session, Duty.kitchen, tuesday, tuesday + timedelta(days=14), tuesday
+    )
+    plan = next(iter(preview.plans.values()))
+    up_today = next(
+        p for p in people if p.id in plan[0].potential_drivers and p.id not in {p1.id, p2.id}
+    )
+    await client.post("/logout")
+    await login(client, up_today.username)
+    line = you_line((await client.get("/")).text)
+    words = re.sub(r"<[^>]+>", "", line)
+    assert f"Next kitchen: today from {settings.deadline_hour:02d}:05" in words
 
 
 async def test_undo_on_the_card(session, client, monkeypatch):
@@ -1799,6 +1829,24 @@ async def test_newcomers_are_told_what_this_is_and_whom_to_ask(session, client):
     assert "+100 points = one duty more than your fair share" in stats
 
 
+async def test_stats_say_where_you_stand(session, client):
+    people = await make_users(session, n=4)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await strikes.issue(session, user_id=p1.id, reason="test", today=MONDAY)
+    await session.commit()
+    await login(client, p1.username)
+    page = text(await client.get("/stats"))
+    you = re.sub(r"<[^>]+>", "", page.split('id="you"')[1].split("</p>")[0])
+    # p1 cleaned once with 3 riders: two thirds of a duty ahead in the kitchen.
+    assert "Kitchen: 0.7 duties ahead" in you and "Trash: on par" in you
+    assert f"Strikes: 1 of {settings.strike_threshold}" in you
+    # The counts are hidden on phones; the table says so there.
+    assert 'class="num count"' in page and "More columns on a wider screen" in page
+
+
 async def test_profile_puts_strikes_first_and_password_last(session, client):
     people = await make_users(session, n=3)
     later = settings.today() + timedelta(days=3)
@@ -2013,7 +2061,7 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     assert r.headers.get("hx-refresh") == "true"
     assert "already emptied by you" in text(await client.get("/"))
     stats = text(await client.get("/stats"))
-    hero_in = f"hero in {dishwasher.next_month(settings.today()):%B}"
+    hero_in = f"on track for {dishwasher.next_month(settings.today()):%B}"
     assert 'id="dishwasher"' in stats and stats.count(hero_in) == 1
     assert "You emptied it once this month" in text(await client.get("/me"))
     assert (await client.post("/admin/dishwasher/1/delete")).status_code == 403

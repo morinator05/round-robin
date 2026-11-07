@@ -12,7 +12,7 @@
   <h2>The duties</h2>
   <p><strong>Kitchen duty</strong>: every day, tidy up and clean the shared kitchen.
     {% if kitchen_people > 1 %}{{ kitchen_people }} people are assigned, but only one of them
-    has to clean. Agree who cleans; whoever cleans clicks Done. If nobody does by
+    has to clean. Agree who cleans; whoever cleans clicks “I cleaned it”. If nobody does by
     {{ deadline_hour }}:00 the next morning, you both get a strike.{% endif %}</p>
   <p><strong>Trash duty</strong>: for one week (Monday to Sunday), take out the trash.
     {% if trash_people > 1 %}{{ trash_people }} people are assigned, one of them is enough.{% endif %}</p>
@@ -34,7 +34,7 @@
 
 <section class="card help" id="marking">
   <h2>Marking a duty as done</h2>
-  <p>Once you've cleaned, click <strong>Done</strong> next to your name on the
+  <p>Once you've cleaned, click <strong>I cleaned it</strong> next to your name on the
     <a href="/">overview</a>. Only whoever actually cleaned marks it.</p>
   <p>Deadline: {{ deadline_hour }}:00 on the day after the duty, so for trash duty the
     Monday after your week. After that the duty counts as missed.</p>
