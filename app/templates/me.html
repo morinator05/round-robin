@@ -51,6 +51,12 @@
   {% else %}<tr><td class="muted" colspan="3">No strikes.</td></tr>{% endfor %}
 </table></div>
 
+<h2>Dishwasher {{ help_link("dishwasher") }} <span class="muted">{{ today|month_name }}</span></h2>
+{% if is_hero %}<p>You have no kitchen duty in {{ today|month_name }} as a
+  <span class="tag tag-hero">dishwasher hero</span> of {{ heroes_from|month_name }}.</p>{% endif %}
+{% if dishwasher_mine %}<p>You emptied it {{ "once" if dishwasher_mine == 1 else dishwasher_mine ~ " times" }} this month.</p>
+{% else %}<p class="muted">You haven't emptied it this month.</p>{% endif %}
+
 <h2>My recent duties</h2>
 <div class="table-wrap"><table>
   <tr><th>Date</th><th>Duty</th><th class="end">Status</th></tr>

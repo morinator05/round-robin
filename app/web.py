@@ -8,7 +8,7 @@ Only the login and logout (`public`) work without a session. Every route on `rou
 requires a login, also new ones, so nothing personal is visible to the rest of the network.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
@@ -26,8 +26,18 @@ from app import deps
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session, require_user
 from app.formatting import long_date, short_date
-from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
-from app.services import auth, carpool, duties, jobs, strikes, users
+from app.models import (
+    AwayPeriod,
+    DishwasherClear,
+    Duty,
+    PotentialDriver,
+    Status,
+    Strike,
+    Trip,
+    User,
+)
+from app.services import auth, carpool, dishwasher, duties, jobs, strikes, users
+from app.services.dishwasher import DishwasherError
 from app.services.duties import DutyError
 from app.services.login_throttle import account_throttle, login_throttle
 from app.services.users import UserError
@@ -72,6 +82,8 @@ templates.env.globals["help_link"] = help_link
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
+templates.env.globals["dishwasher_cooldown"] = settings.dishwasher_cooldown_minutes
+templates.env.globals["dishwasher_heroes"] = settings.dishwasher_heroes
 templates.env.globals["floor_name"] = settings.floor_name
 templates.env.globals["min_password_length"] = auth.MIN_PASSWORD_LENGTH
 # Appended to the stylesheet URL, so browsers load it again after it changed instead of
@@ -87,6 +99,9 @@ templates.env.filters["date_time"] = lambda d: (
 # Points with their sign: "+37", "−112" (a real minus sign), "0".
 templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"
 templates.env.filters["weekday"] = lambda d: f"{d:%a}"
+templates.env.filters["month_name"] = lambda d: f"{d:%B}"
+templates.env.filters["clock"] = dishwasher.clock
+templates.env.filters["local_date"] = lambda d: d.astimezone(settings.tz).date()
 
 
 def flash(request: Request, message: str, kind: str = "ok") -> None:
@@ -248,9 +263,10 @@ async def dashboard(
         return trip.end_date + timedelta(days=1) if trip else today
 
     horizon = today + timedelta(days=settings.preview_days)
-    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon)
-    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon)
+    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon, today)
+    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon, today)
     people = await users_by_id(session)
+    dishwasher_card = await dishwasher_ctx(session, user, now, people)
 
     choices = [uid for uid in kitchen_preview.plans if uid is not None]
     # Lenient: anything that isn't one of the choices (also "abc") shows the default.
@@ -278,7 +294,68 @@ async def dashboard(
         kitchen_later=later,
         trash_plan=next(iter(trash_preview.plans.values())),
         users_by_id=people,
+        dishwasher=dishwasher_card,
     )
+
+
+async def dishwasher_ctx(
+    session: AsyncSession, user: User, now: datetime, people: dict[int, User]
+) -> dict:
+    """Template variables for `partials/dishwasher_card.html` and the hero line above the
+    kitchen preview.
+
+    `state` is what the user's row shows: "can_mark" (the button), "done" (they emptied it
+    last and the next one doesn't count yet), "not_needed" (someone else did) or "inactive".
+    """
+    today = now.date()
+    last = await dishwasher.last_clear(session)
+    allowed = dishwasher.next_allowed(last)
+    waiting = allowed is not None and now < allowed
+    if not user.active:
+        state = "inactive"
+    elif not waiting:
+        state = "can_mark"
+    elif last.user_id == user.id:
+        state = "done"
+    else:
+        state = "not_needed"
+    standings = await dishwasher.standings(session, today)
+    heroes = [people[uid] for uid in await dishwasher.heroes(session, today) if uid in people]
+    return {
+        "month": today,
+        "last": last,
+        "next_allowed": allowed if waiting else None,
+        "state": state,
+        "mine": next((s.count for s in standings if s.user_id == user.id), 0),
+        "heroes": heroes,
+        "is_hero": any(u.id == user.id for u in heroes),
+        "other_heroes": [u for u in heroes if u.id != user.id],
+        "heroes_from": dishwasher.previous_month(today),
+    }
+
+
+def is_card_request(request: Request) -> bool:
+    """Whether a dashboard card posted this via htmx (`?card=1`). On success it gets the
+    dashboard again and takes its own card from it (hx-select)."""
+    return bool(request.headers.get("HX-Request") and request.query_params.get("card"))
+
+
+@router.post("/dishwasher")
+async def mark_dishwasher(request: Request, session: Session, user: CurrentUser):
+    """You emptied the dishwasher; from the dashboard card."""
+    card = is_card_request(request)
+    try:
+        await dishwasher.mark_cleared(session, user, settings.now())
+        await session.commit()
+    except DishwasherError as e:
+        flash(request, str(e), "error")
+        if card:
+            # The card would drop the error message; reload the page so the flash shows.
+            return Response(headers={"HX-Refresh": "true"})
+        return redirect("/")
+    if not card:
+        flash(request, "Marked as emptied")
+    return redirect("/")
 
 
 @router.post("/potential-drivers/{potential_driver_id}/drove")
@@ -286,21 +363,20 @@ async def mark_as_driver(
     request: Request, session: Session, user: CurrentUser, potential_driver_id: int
 ):
     """Mark who drove (did the duty), from the dashboard card or the admin page."""
-    # The dashboard card posts with `card=1`. On success it gets the dashboard again and
-    # takes its own card and the previews from it (hx-select / hx-select-oob), so the
+    # The dashboard card also takes the previews from the dashboard (hx-select-oob), so the
     # preview shows the now known outcome too.
-    is_card_request = bool(request.headers.get("HX-Request") and request.query_params.get("card"))
+    card = is_card_request(request)
     try:
         pd = await duties.get_potential_driver(session, potential_driver_id)
         await duties.mark_as_driver(session, pd, user, settings.now())
         await session.commit()
     except DutyError as e:
         flash(request, str(e), "error")
-        if is_card_request:
+        if card:
             # The card would drop the error message; reload the page so the flash shows.
             return Response(headers={"HX-Refresh": "true"})
         return redirect(safe_next(request.query_params.get("next")))
-    if is_card_request:
+    if card:
         return redirect("/")
     flash(request, "Marked as done")
     return redirect(safe_next(request.query_params.get("next")))
@@ -311,7 +387,7 @@ async def mark_as_driver(
 
 @router.get("/me")
 async def me(request: Request, session: Session, user: CurrentUser):
-    """Own page: away periods, password, strikes and recent duties."""
+    """Own page: away periods, password, strikes, dishwasher and recent duties."""
     aways = await session.scalars(
         select(AwayPeriod)
         .where(AwayPeriod.user_id == user.id, AwayPeriod.end_date >= settings.today())
@@ -328,6 +404,8 @@ async def me(request: Request, session: Session, user: CurrentUser):
         .order_by(Trip.start_date.desc())
         .limit(30)
     )
+    today = settings.today()
+    standings = await dishwasher.standings(session, today)
     return render(
         request,
         "me.html",
@@ -335,6 +413,9 @@ async def me(request: Request, session: Session, user: CurrentUser):
         aways=list(aways),
         strikes=list(my_strikes),
         history=list(history),
+        dishwasher_mine=next((s.count for s in standings if s.user_id == user.id), 0),
+        is_hero=user.id in await dishwasher.heroes(session, today),
+        heroes_from=dishwasher.previous_month(today),
     )
 
 
@@ -486,6 +567,8 @@ async def stats(request: Request, session: Session, user: CurrentUser):
         queue = carpool.choose_potential_drivers(b, ids, len(ids), rooms)
         scores = {uid: b[uid].score if uid in b else Fraction(0) for uid in ids}
         points[d] = carpool.display_points(scores, queue)
+    today = settings.today()
+    by_id = {u.id: u for u in all_users}
     return render(
         request,
         "stats.html",
@@ -494,6 +577,12 @@ async def stats(request: Request, session: Session, user: CurrentUser):
         points=points,
         counts=counts,
         active=active,
+        dishwasher_rows=[
+            (by_id[s.user_id], s.count)
+            for s in await dishwasher.standings(session, today)
+            if s.user_id in by_id
+        ],
+        heroes_month=dishwasher.next_month(today),
     )
 
 
@@ -546,6 +635,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         trips=list(trips),
         strikes=list(all_strikes),
         aways=list(aways),
+        dishwasher_clears=await dishwasher.clears_in_month(session, settings.today()),
     )
 
 
@@ -714,6 +804,23 @@ async def admin_dispute(
     except DutyError as e:
         flash(request, str(e), "error")
     return redirect(safe_next(request.query_params.get("next") or "/history"))
+
+
+@router.post("/admin/dishwasher/{clear_id}/delete")
+async def admin_delete_dishwasher(
+    request: Request, session: Session, user: AdminUser, clear_id: int
+):
+    """Remove a wrongly marked emptying of the dishwasher (current month only)."""
+    clear = await session.get(DishwasherClear, clear_id)
+    if clear is None:
+        raise HTTPException(404)
+    try:
+        await dishwasher.delete_clear(session, clear, user, settings.now())
+        await session.commit()
+        flash(request, "Dishwasher entry deleted")
+    except DishwasherError as e:
+        flash(request, str(e), "error")
+    return redirect("/admin")
 
 
 @router.post("/admin/tick")

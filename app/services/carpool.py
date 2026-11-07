@@ -23,6 +23,8 @@ Our extensions:
   drive, so its potential drivers still have the lowest scores and come up again soon.
   This matches the paper, where every trip is driven. Strikes do the punishing.
 - Penalty trips are outside the count.
+- Dishwasher heroes don't ride on kitchen trips during their hero month: the caller passes
+  that month in as an away period (`duties.load_members`), so they owe no share for it.
 - Moving out: the share of someone who moved out is dropped, not passed on (see
   `charge_riders`), and their score leaves with them. This is the one place the sum can
   differ from 0.

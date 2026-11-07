@@ -1,7 +1,8 @@
 # Round Robin
 
 Web app for the cleaning duties on a dorm floor: assigns kitchen and trash duty fairly,
-tracks who did it and gives strikes for missed duties. The UI is in English.
+tracks who did it and gives strikes for missed duties. Whoever empties the dishwasher most
+gets a month off kitchen duty. The UI is in English.
 
 ## Screenshots
 
@@ -56,6 +57,16 @@ rounded so that they still sum to 0.
   isn't away. It replaces the regular trash duty, doesn't count for fairness and uses up the
   3 strikes.
 
+**Dishwasher**
+- Whoever empties the dishwasher clicks "I emptied it" on the overview.
+- One emptying counts for one person: after someone marks it, nobody can mark it again for
+  1:30h.
+- Counted per calendar month. The 2 residents with the most emptyings become **dishwasher
+  heroes**: no kitchen duty for the whole next month. That month counts like being away (for
+  kitchen only), so they don't have to catch up afterwards. Trash duty stays as usual.
+- Ties: whoever reached the count first wins.
+- The floor speaker can delete wrong entries of the current month; earlier months are final.
+
 **Absences** ("Away", on "My profile"): not picked during that time. A duty you already
 have stays yours (the floor speaker can excuse it); a penalty week moves to your next free
 week.
@@ -66,7 +77,7 @@ week.
 - Mark any duty done (also after the deadline), excuse it ("Excuse": no strike, no
   credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
   gets a strike).
-- Give and revoke strikes; run the daily job by hand.
+- Give and revoke strikes; delete wrong dishwasher entries; run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `E103`: building, floor, room 01–99.
@@ -83,8 +94,8 @@ the floor speaker setting a new one) logs out all other devices.
 
 | Page | Access | Content |
 |---|---|---|
-| Overview | login | Today's duties, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
-| Statistics | login | Per resident: done, missed, points (score × 100), strikes |
+| Overview | login | Today's duties, the dishwasher, plan for the next 14 days. Until today's kitchen duty is marked, the plan depends on who cleans: one plan per person, picked above it |
+| Statistics | login | Per resident: done, missed, points (score × 100), strikes, dishwasher this month, heroes |
 | History | login | Duty history, 4 weeks per page |
 | My profile | login | Absences, strikes, recent duties, password |
 | How it works | login | The rules, for new residents |
@@ -105,6 +116,8 @@ In `.env`, see `.env.example`.
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
 | `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
+| `DISHWASHER_COOLDOWN_MINUTES` | `90` | Minutes after an emptying before the next one can be marked. |
+| `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, see below. |
 
@@ -156,7 +169,7 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 ## Code
 
 - `app/services/carpool.py`: the fairness logic, without database (start reading here)
-- `app/services/`: the other rules (duties, strikes, users, login, daily job)
+- `app/services/`: the other rules (duties, strikes, dishwasher, users, login, daily job)
 - `app/web.py`: pages and form actions; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
 - `scripts/`: create the first floor speaker, add test residents

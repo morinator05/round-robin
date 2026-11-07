@@ -1,0 +1,27 @@
+{# The dishwasher on the dashboard, built like a duty card: the logged-in user's row with the
+   button or their state, and one line below. Expects `dishwasher` (see `web.dishwasher_ctx`).
+   The button posts via htmx and gets the dashboard back; it takes this card from it. #}
+{% set d = dishwasher %}
+<section class="card duty" id="card-dishwasher">
+  <h2>Dishwasher <span class="muted">{{ d.month|month_name }}</span></h2>
+  <div class="person">
+    <div class="name">{{ person(user) }}</div>
+    {% if d.state == "can_mark" %}
+      <button hx-post="/dishwasher?card=1" hx-target="#card-dishwasher" hx-select="#card-dishwasher"
+              hx-swap="outerHTML">I emptied it</button>
+    {% elif d.state == "done" %}
+      <span class="badge s-drove">done</span>
+    {% elif d.state == "not_needed" %}
+      <span class="badge s-rode">not needed</span>
+    {% else %}
+      <span class="badge">inactive</span>
+    {% endif %}
+  </div>
+  <p class="muted foot">
+    {% if d.last %}Last emptied by {{ person(d.last.user) }}
+      {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}.
+    {%- else %}Nobody has emptied it yet.{% endif %}
+    {% if d.next_allowed and d.state != "inactive" %}The next one counts from {{ d.next_allowed|clock }}.{% endif %}
+    {% if d.mine %}You emptied it {{ "once" if d.mine == 1 else d.mine ~ " times" }} this month.{% endif %}
+  </p>
+</section>

@@ -2,8 +2,8 @@
 {% block title %}How it works – {{ super() }}{% endblock %}
 {% block content %}
 <h1>How it works</h1>
-<p>On our floor we share two cleaning duties. This site splits them fairly and keeps track of
-  who did what.</p>
+<p>On our floor we share kitchen and trash duty and keep count of who empties the dishwasher.
+  This site splits the duties fairly and keeps track of who did what.</p>
 
 <section class="card help" id="duties">
   <h2>The duties</h2>
@@ -63,6 +63,19 @@
     You won't be assigned during that time, and it doesn't count against you. A duty you
     already have stays yours, so add absences early; if something comes up at short notice,
     ask the floor speaker to excuse it. A penalty week moves to your next free week.</p>
+</section>
+
+<section class="card help" id="dishwasher">
+  <h2>Dishwasher</h2>
+  <p>When you've emptied the dishwasher, click <strong>I emptied it</strong> on the
+    <a href="/">overview</a>. After each entry nobody can mark it again for
+    {{ dishwasher_cooldown }} minutes, so one load counts once.</p>
+  <p>The {{ dishwasher_heroes }} people who empty it most in a month become
+    <span class="tag tag-hero">dishwasher heroes</span> and get the whole next month off
+    kitchen duty. It doesn't count against them, like being away. Trash duty stays as usual.
+    On a tie, whoever reached that number first wins.</p>
+  <p>The <a href="/stats#dishwasher">statistics</a> show this month's count. Only mark it when
+    you really emptied it: the floor speaker can delete wrong entries from the current month.</p>
 </section>
 
 <section class="card help" id="points">

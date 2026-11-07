@@ -12,7 +12,8 @@ created them while only the floor speaker existed). Afterwards today's duties ar
 `--days N` needs a database without history (`docker compose down -v`). It plays the
 last N days through the app's own rules: the daily job at DEADLINE_HOUR:05, each duty
 done the same evening, the next morning before the deadline, or missed (giving strikes
-and penalty weeks), depending on how reliable each resident is, and a few absences.
+and penalty weeks), depending on how reliable each resident is, a few absences, and the
+dishwasher emptied up to twice a day (some residents do it much more often than others).
 Today's kitchen duty is left open. `--random-seed` gives the same history again.
 """
 
@@ -32,7 +33,7 @@ from sqlalchemy.orm import selectinload  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.models import Duty, PotentialDriver, Status, Strike, Trip, User  # noqa: E402
-from app.services import duties, jobs, users  # noqa: E402
+from app.services import dishwasher, duties, jobs, users  # noqa: E402
 
 # fmt: off
 # Star Trek (TOS and TNG) nicknames, so no test resident shares a real resident's name
@@ -127,6 +128,9 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     )
     residents = list(await session.scalars(select(User).where(User.active.is_(True))))
     reliability = {u.id: rng.uniform(0.75, 0.98) for u in residents}
+    # How often each one empties the dishwasher, relative to the others.
+    resident_ids = [u.id for u in residents]
+    keen = [rng.choice([0.2, 1, 1, 3]) for _ in residents]
 
     # A few absences, one of them usually around today.
     for u in rng.sample([u for u in residents if not u.is_admin], k=min(3, len(residents) - 1)):
@@ -143,8 +147,10 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
             # Late ones mark the next morning, an hour before the deadline.
             (at(day, max(hour - 1, 0)), "late"),
             (at(day, hour, 5), "tick"),
+            (at(day, 13), "dishwasher"),
             (at(day, 18), "trash"),
             (at(day, 20), "kitchen"),
+            (at(day, 21, 30), "dishwasher"),
         ]
         for when, step in steps:
             if when >= now:
@@ -158,6 +164,11 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
                 await decide(session, Duty.trash, day, when, reliability, rng, late)
             elif step == "kitchen" and day < today:
                 await decide(session, Duty.kitchen, day, when, reliability, rng, late)
+            elif step == "dishwasher" and rng.random() < 0.6:
+                # Loaded again: the ticks expire everything loaded before.
+                emptier = await session.get(User, rng.choices(resident_ids, weights=keen)[0])
+                await dishwasher.mark_cleared(session, emptier, when)
+                await session.commit()
         day += timedelta(days=1)
 
     counts = dict(
