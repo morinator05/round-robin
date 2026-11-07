@@ -330,9 +330,21 @@ table.history .col-action { width: 9rem; }
 main > p { max-width: 68ch; }
 
 /* --- Admin: a bar of links to the sections, with what's waiting in each. */
-.jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.5rem 0 1.25rem; }
+.jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.5rem 0 1.25rem;
+         /* Stays at the top of the long page; the message (z-index 5) goes over it. */
+         position: sticky; top: 0; z-index: 4; padding: .5rem 0; background: var(--bg); }
+/* "Needs attention": the residents close to a penalty week, under the open duties. */
+#attention .near { margin: .75rem 0 0; }
+/* On a phone, one row that scrolls sideways, so the sticky bar doesn't take the screen. */
+@media (max-width: 600px) {
+  .jump { flex-wrap: nowrap; overflow-x: auto; margin-left: -16px; margin-right: -16px;
+          padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+  .jump a { flex: none; }
+}
 /* Sections scrolled into view (jump bar, after an action) stop below the sticky message. */
-main > section[id] { scroll-margin-top: 4rem; }
+main > section[id] { scroll-margin-top: 5.5rem; }
+/* Deleting a resident stays well away from Deactivate: at the far right. */
+.panel .actions form:has(.danger) { margin-left: auto; }
 .jump a { padding: .35rem .7rem .25rem; text-decoration: none; font-weight: 600;
           color: var(--accent-strong); background: var(--card); border: 1px solid var(--border); }
 .jump a:hover { border-color: var(--accent); }

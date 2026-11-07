@@ -1782,6 +1782,41 @@ async def test_admin_page_has_the_frequent_tasks_first(session, client):
     assert "Runs by itself every day at" in page
 
 
+async def test_admin_sees_what_needs_attention(session, client, midday):
+    people = await make_users(session, n=4)
+    await login(client, "p1")
+    # Nothing yet: says so.
+    assert "Nothing needs attention." in (await client.get("/admin")).text
+
+    _, first, second, _, _ = await kitchen_pair(session, people, settings.today())
+    trash = await duties.get_trip(session, Duty.trash, settings.today())
+    for _ in range(settings.strike_threshold - 1):
+        await strikes.issue(session, user_id=people[3].id, reason="x", today=settings.today())
+    await session.commit()
+    page = (await client.get("/admin")).text
+    block = page.split('id="attention"')[1].split("</section>")[0]
+    # Today's open duties with their buttons, and who is one strike before a penalty week.
+    for pd in [first, second, *trash.potential_drivers]:
+        assert f"/admin/potential-drivers/{pd.id}/excuse" in block
+        assert f"/potential-drivers/{pd.id}/drove?next=/admin" in block
+    near = block.split("before a penalty week:")[1]
+    assert f"{people[3].room_number}</span>" in near and 'href="#strikes">2 of 3' in near
+    assert "Nothing needs attention." not in block
+    jump = page.split('class="jump"')[1].split("</div>")[0]
+    assert 'href="#attention"' in jump
+
+
+async def test_give_strike_confirm_names_the_resident(session, client):
+    await make_users(session, n=3)
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    form = page.split('action="/admin/strikes"')[1].split(">")[0]
+    # The text is built from the chosen resident when the form is sent.
+    assert "hx-on:htmx:confirm" in form and "hx-confirm" not in form.replace(
+        "hx-on:htmx:confirm", ""
+    )
+
+
 async def test_admin_confirmations_name_the_person(session, client):
     people = await make_users(session, n=4)
     _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())

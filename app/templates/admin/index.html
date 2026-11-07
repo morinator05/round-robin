@@ -6,18 +6,75 @@
    floor speaker doesn't land at the top of the long page every time. #}
 {% macro name(u) %}{{ u.display_name if u else "the former resident" }}{% endmacro %}
 {% macro when(trip) %}{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% endmacro %}
+{# The buttons for one person on a duty: Done while nobody has, Undo for a moment after,
+   Dispute a done one, Excuse an open or missed one. #}
+{% macro duty_actions(pd, trip) %}
+  {%- set what = trip.duty.label|lower ~ " on " ~ when(trip) %}
+  {%- if not trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
+      <button class="secondary">Done</button></form>
+  {%- endif %}
+  {%- if can_undo(pd) %}
+    <form method="post" action="/potential-drivers/{{ pd.id }}/undo?next=/admin" class="inline">
+      <button class="secondary">Undo</button></form>
+  {%- endif %}
+  {%- if pd.status == Status.drove %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
+          hx-confirm="Dispute {{ name(pd.user) }}'s {{ what }}? They lose the credit and get a strike.">
+      <button class="danger">Dispute</button></form>
+  {%- endif %}
+  {%- if pd.status in (Status.pending, Status.missed) %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline"
+          hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? No strike, no credit.">
+      <button class="secondary">Excuse</button></form>
+  {%- endif %}
+{%- endmacro %}
 {% set all_pds = trips|map(attribute="potential_drivers")|sum(start=[]) %}
 {% set todo = all_pds|selectattr("status", "in", [Status.pending, Status.missed])|list %}
 {% set active_strikes = strikes|rejectattr("revoked_at")|rejectattr("redeemed_by_trip_id")|list %}
 {% set old_strikes = strikes|reject("in", active_strikes)|list %}
+{% set waiting = [] %}
+{% for trip in trips %}{% for pd in trip.potential_drivers %}
+  {% if pd.status == Status.pending or (pd.status == Status.missed and not pd.disputed_at) %}
+    {% set _ = waiting.append((trip, pd)) %}{% endif %}
+{% endfor %}{% endfor %}
+{% set near = [] %}
+{% for u in users %}
+  {% set n = active_strikes|selectattr("user_id", "equalto", u.id)|list|length %}
+  {% if n >= strike_threshold - 1 %}{% set _ = near.append((u, n)) %}{% endif %}
+{% endfor %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 <div class="jump" role="navigation" aria-label="Sections">
+  <a href="#attention">Needs attention <span class="muted">{{ waiting|length + near|length }}</span></a>
   <a href="#duties">Duties <span class="muted">{{ todo|length }} open or missed</span></a>
   <a href="#strikes">Strikes <span class="muted">{{ active_strikes|length }} active</span></a>
   <a href="#absences">Absences <span class="muted">{{ aways|length }}</span></a>
   <a href="#dishwasher">Dishwasher <span class="muted">{{ dishwasher_clears|length }}</span></a>
   <a href="#residents">Residents <span class="muted">{{ users|selectattr("active")|list|length }} active</span></a>
 </div>
+
+<section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
+  <h2>Needs attention</h2>
+  {% if not waiting and not near %}<p class="muted">Nothing needs attention.</p>{% endif %}
+  {% if waiting %}
+  <div class="table-wrap"><table class="trips attention">
+    <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+    <thead><tr><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+    {% for trip, pd in waiting %}
+      <tbody class="trip"><tr>
+        <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
+        <td>{{ person(pd.user) }}</td>
+        <td>{% include "partials/status.html" %}</td>
+        <td class="end">{{ duty_actions(pd, trip) }}</td>
+      </tr></tbody>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+  {% if near %}
+    <p class="near">One strike or less before a penalty week:
+      {% for u, n in near %}{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  {% endif %}
+</section>
 
 <section class="card" id="duties" hx-swap="innerHTML show:#duties:top">
   <h2>Duties <span class="muted">last 14 days</span></h2>
@@ -27,8 +84,6 @@
     <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
     <thead><tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
     {% for trip in trips if trip.duty == duty %}
-      {% set driven = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|list %}
-      {% set what = duty.label|lower ~ " on " ~ when(trip) %}
       <tbody class="trip">
       {% for pd in trip.potential_drivers %}
         <tr>
@@ -38,26 +93,7 @@
           {% endif %}
           <td>{{ person(pd.user) }}</td>
           <td>{% include "partials/status.html" %}</td>
-          <td class="end">
-            {% if not driven %}
-              <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
-                <button class="secondary">Done</button></form>
-            {% endif %}
-            {% if can_undo(pd) %}
-              <form method="post" action="/potential-drivers/{{ pd.id }}/undo?next=/admin" class="inline">
-                <button class="secondary">Undo</button></form>
-            {% endif %}
-            {% if pd.status == Status.drove %}
-              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
-                    hx-confirm="Dispute {{ name(pd.user) }}'s {{ what }}? They lose the credit and get a strike.">
-                <button class="danger">Dispute</button></form>
-            {% endif %}
-            {% if pd.status in (Status.pending, Status.missed) %}
-              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline"
-                    hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? No strike, no credit.">
-                <button class="secondary">Excuse</button></form>
-            {% endif %}
-          </td>
+          <td class="end">{{ duty_actions(pd, trip) }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -96,7 +132,9 @@
 <section class="card" id="strikes" hx-swap="innerHTML show:#strikes:top">
   <h2>Strikes <span class="muted">{{ active_strikes|length }} active</span></h2>
   <form method="post" action="/admin/strikes" class="row"
-        hx-confirm="Give the chosen resident this strike? With {{ strike_threshold }} active strikes a penalty week follows right away.">
+        hx-on:htmx:confirm="event.preventDefault();
+          const who = this.user_id.selectedOptions[0]?.text || 'this resident';
+          if (confirm(`Give ${who} a strike: “${this.reason.value}”? With {{ strike_threshold }} active strikes a penalty week follows right away.`)) event.detail.issueRequest();">
     <label>Resident
       <select name="user_id" required>
         <option value="">Choose resident…</option>
