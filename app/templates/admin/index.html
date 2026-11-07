@@ -54,13 +54,12 @@
 
 <section class="card">
   <h2>Absences <span class="muted">current and upcoming</span></h2>
-  <div class="table-wrap"><table>
-    <tr><th>Resident</th><th>From</th><th>To</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+  <div class="table-wrap"><table class="compact">
+    <tr><th>Resident</th><th>Dates</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for a in aways %}
       <tr>
         <td>{{ person(a.user) }}</td>
-        <td>{{ a.start_date|long_date }}</td>
-        <td>{{ a.end_date|long_date }}</td>
+        <td>{{ a.start_date|short_date }}–{{ a.end_date|long_date }}</td>
         <td class="end">
           <form method="post" action="/me/away/{{ a.id }}/delete?next=/admin" class="inline"
                 hx-confirm="Delete this absence of {{ a.user.first_name }}?">
@@ -68,7 +67,7 @@
           </form>
         </td>
       </tr>
-    {% else %}<tr><td class="muted" colspan="4">Nobody is away.</td></tr>{% endfor %}
+    {% else %}<tr><td class="muted" colspan="3">Nobody is away.</td></tr>{% endfor %}
   </table></div>
 </section>
 
@@ -109,7 +108,7 @@
 
 <section class="card">
   <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="compact">
     <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for c in dishwasher_clears %}
       <tr>

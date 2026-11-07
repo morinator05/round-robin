@@ -18,7 +18,7 @@ from starlette.routing import Route
 
 from app import web
 from app.config import settings
-from app.formatting import long_date
+from app.formatting import long_date, short_date
 from app.main import app
 from app.models import (
     AwayPeriod,
@@ -1710,7 +1710,8 @@ async def test_admin_sees_and_deletes_absences(session, client):
     await session.commit()
     away_id = (await session.scalar(select(AwayPeriod))).id
     await login(client, "p1")
-    assert long_date(later) in (await client.get("/admin")).text
+    span = f"{short_date(later)}–{long_date(later + timedelta(days=2))}"
+    assert span in (await client.get("/admin")).text
     r = await client.post(f"/me/away/{away_id}/delete?next=/admin")
     assert r.headers["location"] == "/admin"
     assert await session.scalar(select(func.count(AwayPeriod.id))) == 0

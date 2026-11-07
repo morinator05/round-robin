@@ -38,7 +38,7 @@
 
 {% set active = strikes|selectattr("is_active")|list %}
 <h2>Strikes {{ help_link("strikes") }} <span class="muted">{{ active|length }} active</span></h2>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="compact">
   <tr><th>Date</th><th>Reason</th><th class="end">Status</th></tr>
   {% for s in strikes %}
     <tr>
@@ -58,7 +58,7 @@
 {% else %}<p class="muted">You haven't emptied it this month.</p>{% endif %}
 
 <h2>My recent duties</h2>
-<div class="table-wrap"><table>
+<div class="table-wrap"><table class="compact">
   <tr><th>Date</th><th>Duty</th><th class="end">Status</th></tr>
   {% for pd in history %}
     <tr>

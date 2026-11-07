@@ -228,8 +228,18 @@ form.stack button { align-self: flex-start; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 
 /* --- Tables: a panel with hairline rows. */
-.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border);
-              box-shadow: var(--shadow); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); box-shadow: var(--shadow);
+  /* A soft shadow at an edge where more of the table is hidden, so a table that scrolls
+     sideways on a phone shows it: the card-coloured covers scroll with the content
+     ("local") and hide the shadows ("scroll") once that edge is reached. */
+  background:
+    linear-gradient(to right, var(--card) 40%, transparent) left / 2.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--card) 40%, transparent) right / 2.5rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(31, 63, 115, .22), transparent)
+      left / .9rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(31, 63, 115, .22), transparent)
+      right / .9rem 100% no-repeat scroll,
+    var(--card); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: .55rem .8rem .45rem; border-bottom: 1px solid var(--border);
          vertical-align: middle; }
@@ -247,6 +257,10 @@ th.end { width: 1%; }
 /* Statistics: each number column exactly as wide as its one-line heading, all with the
    same gap; the name column takes the rest. */
 table.stats th:not(:first-child) { width: 1%; }
+/* The names stay in view while the numbers scroll sideways on a phone. */
+table.stats tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--card);
+                                box-shadow: 1px 0 0 var(--border); }
+table.stats tr > th:first-child, table.stats tr:hover > td:first-child { background: var(--card-alt); }
 /* Muted rows (inactive residents, revoked strikes) keep the normal text size. */
 tr.muted { font-size: inherit; }
 /* Numbers line up on the right, in even-width digits. */
@@ -329,6 +343,11 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.history .col-action { width: 7.5rem; }
   table.history td:first-child { white-space: normal; }
   .card .table-wrap table { min-width: 36rem; }
+  /* Small tables (a date, a name or two, a tag or button) fit the screen instead: the
+     date may take two lines and the cells are a bit narrower. */
+  .card .table-wrap table.compact { min-width: 0; }
+  table.compact th, table.compact td { padding-left: .55rem; padding-right: .55rem; }
+  table.compact td:first-child { white-space: normal; }
   /* Admin duties: the date may take two lines, so the names keep room; scrolls sideways. */
   .card .table-wrap table.trips { min-width: 42rem; }
   table.trips .col-date { width: 7.5rem; }
