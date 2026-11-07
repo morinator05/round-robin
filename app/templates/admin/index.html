@@ -128,14 +128,20 @@
 
 <section class="card">
   <h2>Duties <span class="muted">last 14 days and planned</span></h2>
-  <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr>
-    {% for trip in trips %}
+  {% for duty in Duty %}
+  <h3>{{ duty.label }}</h3>
+  <div class="table-wrap"><table class="trips">
+    <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+    <thead><tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+    {% for trip in trips if trip.duty == duty %}
       {% set driven = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|list %}
+      <tbody class="trip">
       {% for pd in trip.potential_drivers %}
         <tr>
-          <td>{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}</td>
-          <td>{{ trip.duty.label }}{% if trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
+          {% if loop.first %}
+          <td rowspan="{{ loop.length }}">{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
+            {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
+          {% endif %}
           <td>{{ person(pd.user) }}</td>
           <td>{% include "partials/status.html" %}</td>
           <td class="end">
@@ -155,8 +161,12 @@
           </td>
         </tr>
       {% endfor %}
+      </tbody>
+    {% else %}
+      <tbody><tr><td class="muted" colspan="4">No duties in this period.</td></tr></tbody>
     {% endfor %}
   </table></div>
+  {% endfor %}
 
   <form method="post" action="/admin/tick" class="actions">
     <button class="secondary">Run daily job now</button>

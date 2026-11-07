@@ -104,6 +104,7 @@ nav form { margin: 0; }
 .card { background: var(--card); border: 1px solid var(--border);
         padding: 1.25rem; box-shadow: var(--shadow); }
 .card h2 { margin-top: 0; }
+.card h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
@@ -244,6 +245,22 @@ td.points { font-weight: 600; }
 /* The last column of a table, with tags or buttons: kept at the right edge. */
 th.end, td.end { text-align: right; white-space: nowrap; }
 td.end form.inline + form.inline { margin-left: .4rem; }
+/* Admin duties: one table per duty with the same columns, so both line up. A trip's
+   residents sit close together with no line between them, one hairline between trips, and
+   the whole trip lit up on hover. */
+table.trips { table-layout: fixed; min-width: 46rem; }
+table.trips .col-date { width: 11rem; }
+table.trips .col-status { width: 8.5rem; }
+table.trips .col-action { width: 16rem; }
+table.trips tbody.trip td { border-bottom: 0; }
+table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
+table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
+table.trips tbody.trip > tr + tr > td { padding-top: .15rem; }
+/* The date, top-aligned and padded down to the first resident's line (which buttons make
+   taller); a penalty week says so on a second line. */
+table.trips td[rowspan] { vertical-align: top; white-space: normal; padding-top: .85rem; }
+table.trips .penalty { display: block; }
+table.trips tbody.trip:hover td { background: var(--card-alt); }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
    a week ("Mon 27 Oct–2 Nov") is longer than a day. Narrow screens scroll sideways. */
 table.history { table-layout: fixed; min-width: 56rem; }
@@ -302,6 +319,9 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.history .col-action { width: 7.5rem; }
   table.history td:first-child { white-space: normal; }
   .card .table-wrap table { min-width: 36rem; }
+  /* Admin duties: the date may take two lines, so the names keep room; scrolls sideways. */
+  .card .table-wrap table.trips { min-width: 42rem; }
+  table.trips .col-date { width: 7.5rem; }
   /* My profile: "Add" across the whole card, below the dates. */
   .away-form button { flex-basis: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */
