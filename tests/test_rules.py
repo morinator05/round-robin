@@ -20,8 +20,18 @@ from app import web
 from app.config import settings
 from app.formatting import long_date
 from app.main import app
-from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
-from app.services import auth, duties, jobs, strikes, users
+from app.models import (
+    AwayPeriod,
+    DishwasherClear,
+    Duty,
+    PotentialDriver,
+    Status,
+    Strike,
+    Trip,
+    User,
+)
+from app.services import auth, carpool, dishwasher, duties, jobs, strikes, users
+from app.services.dishwasher import DishwasherError
 from app.services.duties import DutyError
 from app.services.login_throttle import LoginThrottle
 from app.services.users import UserError
@@ -235,7 +245,7 @@ async def test_preview_has_one_plan_per_open_potential_driver(session):
 
     async def plans():
         preview = await duties.preview(
-            session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=30)
+            session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=30), MONDAY
         )
         return preview.plans
 
@@ -316,14 +326,16 @@ async def test_each_plan_is_what_really_happens(session, seed, which):
     assert len(pair) == 2 and len(set(scores.values())) == 2
 
     tomorrow = today + timedelta(days=1)
-    before = await duties.preview(session, Duty.kitchen, tomorrow, today + timedelta(days=14))
+    before = await duties.preview(
+        session, Duty.kitchen, tomorrow, today + timedelta(days=14), today
+    )
     assert set(before.plans) == {pd.user_id for pd in pair}
 
     driver = pair[which]
     pd = await duties.get_potential_driver(session, driver.id)
     await duties.mark_as_driver(session, pd, by_id[driver.user_id], at(today, 20))
     await session.commit()
-    after = await duties.preview(session, Duty.kitchen, tomorrow, today + timedelta(days=14))
+    after = await duties.preview(session, Duty.kitchen, tomorrow, today + timedelta(days=14), today)
     assert after.plans[None] == before.plans[driver.user_id]
 
     await jobs.daily_tick(session, at(tomorrow, hour))
@@ -343,7 +355,9 @@ async def test_morning_preview_follows_yesterdays_pair(session, which):
     await jobs.daily_tick(session, at(MONDAY, hour))
     monday = await duties.get_trip(session, Duty.kitchen, MONDAY)
 
-    preview = await duties.preview(session, Duty.kitchen, tuesday, MONDAY + timedelta(days=14))
+    preview = await duties.preview(
+        session, Duty.kitchen, tuesday, MONDAY + timedelta(days=14), MONDAY
+    )
     assert preview.open_start == MONDAY
     assert list(preview.plans) == [pd.user_id for pd in monday.potential_drivers]
 
@@ -439,7 +453,7 @@ async def test_away_keeps_assigned_duty_but_is_not_chosen_again(session):
     assert away_id in {r.user_id for r in kitchen.riders}
 
     preview = await duties.preview(
-        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=3)
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=3), MONDAY
     )
     assert all(away_id not in e.potential_drivers for plan in preview.plans.values() for e in plan)
 
@@ -574,7 +588,7 @@ async def row_counts(session) -> dict:
     """How many rows each table has, and potential drivers per status."""
     counts = {
         model.__name__: await session.scalar(select(func.count()).select_from(model))
-        for model in (User, AwayPeriod, Strike, Trip, PotentialDriver)
+        for model in (User, AwayPeriod, Strike, Trip, PotentialDriver, DishwasherClear)
     }
     statuses = await session.execute(
         select(PotentialDriver.status, func.count()).group_by(PotentialDriver.status)
@@ -611,12 +625,14 @@ async def test_every_page_needs_a_login(session, client):
     await users.add_away(session, people[1], later, later + timedelta(days=1), settings.today())
     away = await session.scalar(select(AwayPeriod))
     strike = await strikes.issue(session, user_id=people[2].id, reason="x", today=MONDAY)
+    clear = await dishwasher.mark_cleared(session, people[3], settings.now())
     await session.commit()
     ids = {
         "user_id": people[1].id,
         "potential_driver_id": first.id,
         "away_id": away.id,
         "strike_id": strike.id,
+        "clear_id": clear.id,
     }
 
     before = await row_counts(session)
@@ -1277,7 +1293,7 @@ async def test_preview_with_one_driver_left_has_no_switch(session):
     admin = people[0]
     await duties.excuse(session, first, admin, at(MONDAY, 10))
     preview = await duties.preview(
-        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=7)
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=7), MONDAY
     )
     assert list(preview.plans) == [p2.id]
 
@@ -1576,3 +1592,201 @@ async def test_stats_counts_active_strikes(session, client):
     await strikes.revoke(session, revoked, at(MONDAY))
     await session.commit()
     assert await strikes.active_counts(session) == {people[1].id: 1}
+
+
+# --- dishwasher -------------------------------------------------------------
+
+NOVEMBER = date(2026, 11, 1)  # a Sunday; MONDAY is the day after
+
+
+async def empty_in_turn(session, people, day: date) -> None:
+    """Each of `people` empties the dishwasher once on `day`, in order, 2 hours apart."""
+    when = at(day, 8)
+    for p in people:
+        await dishwasher.mark_cleared(session, p, when)
+        when += timedelta(hours=2)
+    await session.commit()
+
+
+async def test_dishwasher_cooldown_is_for_everyone(session):
+    people = await make_users(session, n=3)
+    a, b = people[1], people[2]
+    start = at(MONDAY, 10)
+    await dishwasher.mark_cleared(session, a, start)
+    almost = start + timedelta(minutes=settings.dishwasher_cooldown_minutes - 1)
+    with pytest.raises(DishwasherError, match="emptied by Person .* from 11:30"):
+        await dishwasher.mark_cleared(session, b, almost)
+    with pytest.raises(DishwasherError, match="emptied by you"):
+        await dishwasher.mark_cleared(session, a, almost)
+    await dishwasher.mark_cleared(session, b, start + timedelta(minutes=90))
+    await session.commit()
+    # One each; on the tie whoever got there first is ahead.
+    assert [(s.user_id, s.count) for s in await dishwasher.standings(session, MONDAY)] == [
+        (a.id, 1),
+        (b.id, 1),
+    ]
+
+
+async def test_paused_resident_cannot_mark_dishwasher(session):
+    people = await make_users(session, n=3)
+    await users.set_active(session, people[2], False, at(MONDAY))
+    with pytest.raises(DishwasherError, match="Inactive"):
+        await dishwasher.mark_cleared(session, people[2], at(MONDAY, 10))
+
+
+async def test_dishwasher_heroes_are_the_top_of_last_month(session):
+    people = await make_users(session, n=6)
+    a, b, c, d = people[1:5]
+    # a 3, c 2 (reached first), b 2, d 1.
+    await empty_in_turn(session, [a, c, c, b, a, b, a, d], date(2026, 10, 20))
+    assert await dishwasher.heroes(session, NOVEMBER) == [a.id, c.id]
+    assert await dishwasher.heroes(session, date(2026, 11, 30)) == [a.id, c.id]
+    # October's heroes come from September, December's from November: none.
+    assert await dishwasher.heroes(session, date(2026, 10, 31)) == []
+    assert await dishwasher.heroes(session, date(2026, 12, 1)) == []
+
+
+async def test_dishwasher_months_are_in_local_time(session):
+    people = await make_users(session, n=3)
+    a, b = people[1], people[2]
+    await dishwasher.mark_cleared(session, a, at(date(2026, 10, 31), 22))
+    late = datetime.combine(NOVEMBER, time(0, 10), settings.tz)
+    await dishwasher.mark_cleared(session, b, late)
+    await session.commit()
+    assert [s.user_id for s in await dishwasher.standings(session, date(2026, 10, 1))] == [a.id]
+    assert [s.user_id for s in await dishwasher.standings(session, NOVEMBER)] == [b.id]
+
+
+async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session):
+    people = await make_users(session, n=4)
+    admin, a, b = people[0], people[1], people[2]
+    heroes = {a.id, b.id}
+    await empty_in_turn(session, [a, b], date(2026, 10, 20))
+
+    trash_drivers = set()
+    day = NOVEMBER
+    while day.month == 11:
+        await jobs.daily_tick(session, at(day))
+        kitchen = await duties.get_trip(session, Duty.kitchen, day)
+        await session.refresh(kitchen, ["riders"])
+        assert not heroes & {r.user_id for r in kitchen.riders}
+        assert not heroes & {pd.user_id for pd in kitchen.potential_drivers}
+        trash = await duties.get_trip(session, Duty.trash, day)
+        await session.refresh(trash, ["riders"])
+        assert heroes <= {r.user_id for r in trash.riders}
+        trash_drivers |= {pd.user_id for pd in trash.potential_drivers}
+        # The floor speaker marks both, so nobody collects strikes (or a penalty week).
+        for trip in (kitchen, trash):
+            if not duties.was_driven(trip):
+                pd = await duties.get_potential_driver(session, trip.potential_drivers[0].id)
+                await duties.mark_as_driver(session, pd, admin, at(day, 20))
+        await session.commit()
+        day += timedelta(days=1)
+
+    # Trash duty goes on as usual for them.
+    assert heroes & trash_drivers
+    # The free month costs them nothing.
+    balances = await duties.load_balances(session, Duty.kitchen)
+    assert all(balances.get(uid, carpool.Balance()).fair_share == 0 for uid in heroes)
+
+    # December: back on kitchen duty.
+    await jobs.daily_tick(session, at(date(2026, 12, 1)))
+    december = await duties.get_trip(session, Duty.kitchen, date(2026, 12, 1))
+    await session.refresh(december, ["riders"])
+    assert heroes <= {r.user_id for r in december.riders}
+
+
+async def test_preview_leaves_out_dishwasher_heroes(session):
+    people = await make_users(session, n=6)
+    heroes = {people[1].id, people[2].id}
+    await empty_in_turn(session, [people[1], people[2]], date(2026, 10, 20))
+    await jobs.daily_tick(session, at(MONDAY))
+
+    def planned(preview) -> set[int]:
+        return {uid for plan in preview.plans.values() for e in plan for uid in e.potential_drivers}
+
+    window = (MONDAY + timedelta(days=1), MONDAY + timedelta(days=14))
+    now_known = await duties.preview(session, Duty.kitchen, *window, MONDAY)
+    assert planned(now_known) and not heroes & planned(now_known)
+    # Before November, its heroes aren't known yet: November is planned with everyone.
+    in_october = await duties.preview(session, Duty.kitchen, *window, date(2026, 10, 30))
+    assert heroes & planned(in_october)
+
+
+async def test_admin_deletes_only_this_months_dishwasher_entries(session):
+    people = await make_users(session, n=3)
+    admin = people[0]
+    old = await dishwasher.mark_cleared(session, people[1], at(date(2026, 10, 20)))
+    new = await dishwasher.mark_cleared(session, people[2], at(MONDAY))
+    await session.commit()
+    with pytest.raises(DishwasherError, match="Only the floor speaker"):
+        await dishwasher.delete_clear(session, new, people[1], at(MONDAY, 12))
+    with pytest.raises(DishwasherError, match="this month"):
+        await dishwasher.delete_clear(session, old, admin, at(MONDAY, 12))
+    await dishwasher.delete_clear(session, new, admin, at(MONDAY, 12))
+    await session.commit()
+    assert [c.id for c in await session.scalars(select(DishwasherClear))] == [old.id]
+
+
+def text(r: httpx.Response) -> str:
+    """The page with all whitespace runs as single spaces, to find sentences across lines."""
+    return " ".join(r.text.split())
+
+
+async def test_dishwasher_pages(session, client, monkeypatch):
+    people = await make_users(session, n=4)
+    # p3 is a hero from last month, shown this month.
+    last_month = dishwasher.previous_month(settings.today()).replace(day=15)
+    await dishwasher.mark_cleared(session, people[2], at(last_month, 12))
+    await session.commit()
+    card = {"HX-Request": "true"}
+
+    await login(client, "p2")
+    page = text(await client.get("/"))
+    assert "I emptied it" in page
+    assert "has no kitchen duty in" in page and "dishwasher hero</span>" in page
+    # The card swaps itself, like "Done".
+    r = await client.post("/dishwasher?card=1", headers=card)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    page = text(await client.get("/"))
+    assert 'badge s-drove">done' in page and "The next one counts from" in page
+    assert "You emptied it once this month" in page and "I emptied it" not in page
+    # Too soon: the page reloads to show why.
+    r = await client.post("/dishwasher?card=1", headers=card)
+    assert r.headers.get("hx-refresh") == "true"
+    assert "already emptied by you" in text(await client.get("/"))
+    stats = text(await client.get("/stats"))
+    hero_in = f"hero in {dishwasher.next_month(settings.today()):%B}"
+    assert 'id="dishwasher"' in stats and stats.count(hero_in) == 1
+    assert "You emptied it once this month" in text(await client.get("/me"))
+    assert (await client.post("/admin/dishwasher/1/delete")).status_code == 403
+
+    # The hero is addressed directly; someone else emptied it just now.
+    await client.post("/logout")
+    await login(client, "p3")
+    page = text(await client.get("/"))
+    assert "You have no kitchen duty in" in page and 'badge s-rode">not needed' in page
+    assert "You have no kitchen duty in" in text(await client.get("/me"))
+
+    await users.set_active(session, people[3], False, settings.now())
+    await session.commit()
+    await client.post("/logout")
+    await login(client, "p4")
+    assert 'class="badge">inactive' in text(await client.get("/"))
+
+    await client.post("/logout")
+    await login(client, "p1")
+    clear_id = await session.scalar(
+        select(DishwasherClear.id).where(DishwasherClear.user_id == people[1].id)
+    )
+    assert f"/admin/dishwasher/{clear_id}/delete" in (await client.get("/admin")).text
+    r = await client.post(f"/admin/dishwasher/{clear_id}/delete")
+    assert r.status_code == 303
+    session.expire_all()
+    assert await session.scalar(select(func.count(DishwasherClear.id))) == 1
+
+    # Without htmx the whole page comes back with a message.
+    monkeypatch.setattr(settings, "dishwasher_cooldown_minutes", 0)
+    r = await client.post("/dishwasher")
+    assert r.status_code == 303
+    assert "Marked as emptied" in text(await client.get("/"))

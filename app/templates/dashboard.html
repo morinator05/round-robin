@@ -9,6 +9,7 @@
   {% with trip=trash.trip, duty=trash.duty, deadline=trash.deadline, can_mark_as_driver=trash.can_mark_as_driver %}
     {% include "partials/duty_card.html" %}
   {% endwith %}
+  {% include "partials/dishwasher_card.html" %}
 </div>
 
 <div class="grid">
@@ -16,6 +17,18 @@
      still do it; the links switch between them (only this section is swapped). #}
   <section class="preview" id="kitchen-preview">
     <h2>Kitchen duty – preview {{ help_link("preview") }}</h2>
+    {# Says why the dishwasher heroes are missing from the plan; "you" first. #}
+    {% set d = dishwasher %}
+    {% if d.heroes %}
+      {% set who = ([user] if d.is_hero else []) + d.other_heroes %}
+      <p class="muted">
+        {%- for u in who %}{% if u.id == user.id %}You{% else %}{{ person(u) }}{% endif %}
+          {%- if loop.revindex == 2 %} and {% elif not loop.last %}, {% endif %}{% endfor %}
+        {{ "has" if who|length == 1 and not d.is_hero else "have" }} no kitchen duty in
+        {{ today|month_name }} as
+        {% if who|length == 1 %}a <span class="tag tag-hero">dishwasher hero</span>{% else %}<span class="tag tag-hero">dishwasher heroes</span>{% endif %}
+        of {{ d.heroes_from|month_name }}.</p>
+    {% endif %}
     {% if kitchen_choices|length > 1 %}
       {% set is_today = kitchen_open_start == today %}
       {% set when = "today" if is_today else ("yesterday" if kitchen_open_start == yesterday else "on " ~ (kitchen_open_start|weekday) ~ " " ~ (kitchen_open_start|short_date)) %}

@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.formatting import long_date
 from app.models import Duty, PotentialDriver, Rider, Status, Trip, User
-from app.services import carpool, strikes
+from app.services import carpool, dishwasher, strikes
 from app.services.carpool import Balance, Member
 
 
@@ -82,16 +82,25 @@ async def current_trip(session: AsyncSession, duty: Duty, now: datetime) -> Trip
     return await get_trip(session, duty, start - timedelta(days=1))
 
 
-async def load_members(session: AsyncSession) -> list[Member]:
-    """All active users (the carpool's members) with their away periods, for `carpool`."""
+async def load_members(session: AsyncSession, duty: Duty, today: date) -> list[Member]:
+    """All active users (the carpool's members of `duty`) with their away periods.
+
+    In the kitchen carpool, `today`'s month counts as an away period of its dishwasher
+    heroes: they get it off kitchen duty, without owing a share for it.
+    """
     users = await session.scalars(
         select(User).where(User.active.is_(True)).options(selectinload(User.away_periods))
     )
+    off: set[int] = set()
+    if duty is Duty.kitchen:
+        off = set(await dishwasher.heroes(session, today))
+    hero_month = dishwasher.month_bounds(today)
     return [
         Member(
             id=u.id,
             room=u.room_number,
-            away=tuple((a.start_date, a.end_date) for a in u.away_periods),
+            away=tuple((a.start_date, a.end_date) for a in u.away_periods)
+            + ((hero_month,) if u.id in off else ()),
         )
         for u in users
     ]
@@ -175,7 +184,7 @@ async def materialize(session: AsyncSession, duty: Duty, day: date) -> Trip:
         return await get_trip(session, duty, day)
 
     start, end = trip_bounds(duty, day)
-    members = await load_members(session)
+    members = await load_members(session, duty, day)
     rooms = {m.id: m.room for m in members}
     riders = [m.id for m in members if m.rides(start, end)]
 
@@ -193,7 +202,7 @@ async def materialize(session: AsyncSession, duty: Duty, day: date) -> Trip:
 
 async def _top_up(session: AsyncSession, trip: Trip, missing: int) -> None:
     """Add `missing` potential drivers to an existing trip, including residents added since."""
-    members = await load_members(session)
+    members = await load_members(session, trip.duty, trip.start_date)
     await session.refresh(trip, ["riders"])
     known = {r.user_id for r in trip.riders}
     for m in members:
@@ -244,11 +253,12 @@ async def reconcile(session: AsyncSession, today: date, keep_user_id: int | None
     for a paused resident, are cancelled until they are back (`users.set_active`).
     """
     await lock_trips(session)
-    members = {m.id: m for m in await load_members(session)}
-    rooms = {uid: m.room for uid, m in members.items()}
+    # Per duty: dishwasher heroes ride on trash trips but not on kitchen ones.
+    members = {d: {m.id: m for m in await load_members(session, d, today)} for d in Duty}
+    rooms = {uid: m.room for uid, m in members[Duty.trash].items()}
 
     def rides(user_id: int | None, trip: Trip) -> bool:
-        member = members.get(user_id)
+        member = members[trip.duty].get(user_id)
         return member is not None and member.rides(trip.start_date, trip.end_date)
 
     trips = (
@@ -260,7 +270,7 @@ async def reconcile(session: AsyncSession, today: date, keep_user_id: int | None
     ).all()
     for trip in trips:
         if trip.is_penalty:
-            await _reconcile_penalty(session, trip, members, today)
+            await _reconcile_penalty(session, trip, members[trip.duty], today)
             continue
         kept = {
             pd.user_id
@@ -502,7 +512,9 @@ class Preview:
     plans: dict[int | None, list[PreviewEntry]]
 
 
-async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> Preview:
+async def preview(
+    session: AsyncSession, duty: Duty, start: date, end: date, today: date
+) -> Preview:
     """Expected potential drivers for the trips starting between `start` and `end`.
 
     Trips that already exist (e.g. penalty weeks) are shown as they are; the others are
@@ -510,6 +522,9 @@ async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> 
     if that one drove it (`carpool.assume_driven`). Older trips nobody has driven yet (e.g.
     yesterday's before the deadline) count as `load_balances` has them: their potential
     drivers keep their share reserved, as when the real trips are chosen.
+
+    The dishwasher heroes of `today`'s month are left out of its kitchen trips. Next
+    month's aren't known yet (its count is still running), so it is planned without any.
     """
     n = potential_drivers_per_trip(duty)
     step = timedelta(days=1 if duty is Duty.kitchen else 7)
@@ -553,7 +568,7 @@ async def preview(session: AsyncSession, duty: Duty, start: date, end: date) -> 
     )
 
     balances = await load_balances(session, duty)
-    members = await load_members(session)
+    members = await load_members(session, duty, today)
     scenarios: dict[int | None, dict[int, Balance]] = {None: balances}
     if pending:
         riders = [r.user_id for r in open_trip.riders]

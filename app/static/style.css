@@ -19,6 +19,7 @@
   --accent: #2f66b0; --accent-soft: #cfe1f7; --accent-strong: #173f73; --accent-line: #8fb3e2;
   --room: #4a5b74; --room-soft: #e3eaf3;
   --me: #6b46c1; --me-soft: #ece4fb;
+  --hero: #0f6a6e; --hero-soft: #d5f1f0;
   --ok: #22703f; --ok-soft: #dcf2e4; --ok-line: #a7d7b9;
   --warn: #a64b07; --warn-soft: #fcf0d5; --warn-line: #ecce8e;
   --bad: #a83232; --bad-soft: #fbe3e3; --bad-line: #ecb0b0;
@@ -35,6 +36,7 @@
     --accent: #9cc4f2; --accent-soft: #284466; --accent-strong: #dbe9fb; --accent-line: #4a72a3;
     --room: #b3c2d6; --room-soft: #2a3648;
     --me: #c4b1f6; --me-soft: #382d57;
+    --hero: #8fdcd8; --hero-soft: #17393b;
     --ok: #9adbb3; --ok-soft: #1c3a2a; --ok-line: #3a6b4e;
     --warn: #ffb066; --warn-soft: #3a2a1a; --warn-line: #7a5230;
     --bad: #f2a7a7; --bad-soft: #432427; --bad-line: #7a3f44;
@@ -95,6 +97,7 @@ nav form { margin: 0; }
        padding: .05em .55em 0; vertical-align: .1em; white-space: nowrap;
        color: var(--neutral); background: var(--neutral-soft); }
 .tag-admin { color: var(--accent-strong); background: var(--accent-soft); }
+.tag-hero { color: var(--hero); background: var(--hero-soft); }
 
 /* --- Panels. */
 .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }

@@ -24,4 +24,17 @@
     </tr>
   {% endfor %}
 </table></div>
+
+{# This month's count so far; the first ones become next month's heroes. #}
+<h2 id="dishwasher">Dishwasher {{ help_link("dishwasher") }} <span class="muted">{{ today|month_name }} so far</span></h2>
+<div class="table-wrap"><table class="stats">
+  <tr><th>Name</th><th class="num">Emptied</th><th class="end"><span class="sr-only">Next month</span></th></tr>
+  {% for u, n in dishwasher_rows %}
+    <tr{% if not u.active %} class="muted"{% endif %}>
+      <td>{{ person(u) }}{% if not u.active %} (inactive){% endif %}</td>
+      <td class="num">{{ n }}</td>
+      <td class="end">{% if loop.index <= dishwasher_heroes %}<span class="tag tag-hero">hero in {{ heroes_month|month_name }}</span>{% endif %}</td>
+    </tr>
+  {% else %}<tr><td class="muted" colspan="3">Nobody has emptied it this month yet.</td></tr>{% endfor %}
+</table></div>
 {% endblock %}

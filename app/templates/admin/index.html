@@ -108,6 +108,25 @@
 </section>
 
 <section class="card">
+  <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
+  <div class="table-wrap"><table>
+    <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+    {% for c in dishwasher_clears %}
+      <tr>
+        <td>{{ c.cleared_at|date_time }}</td>
+        <td>{{ person(c.user) }}</td>
+        <td class="end">
+          <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"
+                hx-confirm="Delete {{ c.user.first_name ~ "'s" if c.user else "this" }} entry from {{ c.cleared_at|date_time }}? It won't count toward the heroes.">
+            <button class="secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}<tr><td class="muted" colspan="3">Nobody has emptied it this month yet.</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section class="card">
   <h2>Duties <span class="muted">last 14 days and planned</span></h2>
   <div class="table-wrap"><table>
     <tr><th>Date</th><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr>

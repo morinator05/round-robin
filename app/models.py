@@ -183,6 +183,22 @@ class PotentialDriver(Base):
     completed_by: Mapped[User | None] = relationship(foreign_keys=[completed_by_id])
 
 
+class DishwasherClear(Base):
+    """Someone emptied the dishwasher. Each month's top ones become dishwasher heroes
+    (`services/dishwasher`)."""
+
+    __tablename__ = "dishwasher_clears"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # NULL once the user was deleted (moved out); the entry no longer counts for anyone.
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    cleared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    user: Mapped[User | None] = relationship()
+
+
 class Strike(Base):
     """A strike against a resident. Enough active ones give a penalty trash week."""
 

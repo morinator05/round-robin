@@ -13,6 +13,8 @@ os.environ.update(
     TRASH_PEOPLE_PER_WEEK="1",
     STRIKE_THRESHOLD="3",
     PREVIEW_DAYS="14",
+    DISHWASHER_COOLDOWN_MINUTES="90",
+    DISHWASHER_HEROES="2",
 )
 
 import asyncpg  # noqa: E402

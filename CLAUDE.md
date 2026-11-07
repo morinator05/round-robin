@@ -65,6 +65,15 @@ strikes it creates a trash `Trip` with `is_penalty=True` in the next free week a
 those strikes as redeemed by it (`Strike.redeemed_by_trip_id`). Penalty trips don't count
 for fairness.
 
+**Dishwasher heroes.** `app/services/dishwasher.py`: residents mark `DishwasherClear`s (one
+per `DISHWASHER_COOLDOWN_MINUTES` for everyone, under an advisory lock). Heroes are computed,
+never stored: `dishwasher.heroes(today)` is the top `DISHWASHER_HEROES` of the previous
+calendar month (ties: earlier last emptying). `duties.load_members(session, duty, today)` adds
+today's month as an away period of each hero for kitchen only, so they neither ride nor are
+chosen and owe no share; `reconcile` therefore loads members per duty, and `preview` takes
+`today` (next month's heroes aren't known yet). Only the current month's entries can be
+deleted, so a hero month never changes once it runs.
+
 **Moved-out users.** Deleting a user sets `user_id` to NULL on their riders/potential
 drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they
 still count for the share size but their share is dropped, not passed on to others.
