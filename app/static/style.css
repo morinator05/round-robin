@@ -107,7 +107,10 @@ nav form { margin: 0; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
-/* My profile: the away periods under the form. */
+/* My profile: the two dates share the card's width, "Add" stays as wide as its text. */
+.away-form label { flex: 1 1 9rem; }
+.away-form input { width: 100%; }
+/* The away periods under the form. */
 .away-list { margin-top: .9rem; border-top: 1px solid var(--border); }
 .away-list .person:first-of-type { padding-top: .6rem; }
 .away-list > p { margin: .6rem 0 0; }
@@ -299,6 +302,8 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.history .col-action { width: 7.5rem; }
   table.history td:first-child { white-space: normal; }
   .card .table-wrap table { min-width: 36rem; }
+  /* My profile: "Add" across the whole card, below the dates. */
+  .away-form button { flex-basis: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */
   .card.help .table-wrap table { min-width: 0; }
 }

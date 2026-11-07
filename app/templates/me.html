@@ -7,7 +7,7 @@
 <div class="grid">
   <section class="card">
     <h2>Away {{ help_link("away") }}</h2>
-    <form method="post" action="/me/away" class="row">
+    <form method="post" action="/me/away" class="row away-form">
       <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
       <label>To <input type="date" name="end_date" required></label>
       <button>Add</button>
