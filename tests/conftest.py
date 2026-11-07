@@ -1,15 +1,14 @@
-"""Test setup: a separate `a4_test` database, recreated empty for every test."""
+"""Test setup: a separate `e1_test` database, recreated empty for every test."""
 
 import os
 
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://a4:a4@localhost:5432/a4_test")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://e1:e1@localhost:5432/e1_test")
 os.environ["RUN_SCHEDULER"] = "false"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-that-is-long-enough-0123456789")
 # The rules as the defaults have them, whatever a local .env says (env vars win over .env).
 os.environ.update(
     TIMEZONE="Europe/Berlin",
     DEADLINE_HOUR="8",
-    DEADLINE_DAYS_AFTER="1",
     KITCHEN_PEOPLE_PER_DAY="2",
     TRASH_PEOPLE_PER_WEEK="1",
     STRIKE_THRESHOLD="3",
@@ -26,6 +25,13 @@ from sqlalchemy.pool import NullPool  # noqa: E402
 from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.models import Base  # noqa: E402
+
+# The fixtures drop the whole schema: never let an exported DATABASE_URL point them at
+# the development or production database.
+if not make_url(settings.database_url).database.endswith("_test"):
+    raise RuntimeError(
+        f"Tests need a database whose name ends in _test, not {settings.database_url!r}"
+    )
 
 
 async def ensure_test_database() -> None:

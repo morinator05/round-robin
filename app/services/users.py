@@ -1,19 +1,40 @@
 """Residents: creating, pausing, moving out, and away periods."""
 
 import re
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models import AwayPeriod, PotentialDriver, Status, Trip, User
-from app.services import carpool, duties
-from app.services.auth import MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT, hash_password
+from app.services import carpool, duties, strikes
+from app.services.auth import check_password_length, hash_password_off_loop
 
 
 class UserError(Exception):
-    """Invalid input; the message is German and shown to the user as is."""
+    """Invalid input; the message is shown to the user as is."""
+
+
+# Column sizes in `models.User`.
+MAX_NAME_LENGTH = 100
+MAX_USERNAME_LENGTH = 50
+# Away periods can't end later than this many days from today.
+MAX_AWAY_DAYS_AHEAD = 365
+
+
+def check_name(name: str) -> str:
+    """The name, trimmed.
+
+    Raises:
+        UserError: if it is empty or too long.
+    """
+    name = name.strip()
+    if not name:
+        raise UserError("The name is required")
+    if len(name) > MAX_NAME_LENGTH:
+        raise UserError(f"The name can have at most {MAX_NAME_LENGTH} characters")
+    return name
 
 
 # Building letter, floor digit, room 01-99 on that floor: E103.
@@ -56,16 +77,19 @@ async def create(
     username = username.strip().lower()
     if not (name.strip() and room_number.strip() and username and password):
         raise UserError("All fields are required")
+    name = check_name(name)
+    if len(username) > MAX_USERNAME_LENGTH:
+        raise UserError(f"The username can have at most {MAX_USERNAME_LENGTH} characters")
     room_number = check_room(room_number)
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise UserError(PASSWORD_TOO_SHORT)
+    if error := check_password_length(password):
+        raise UserError(error)
     if await session.scalar(select(User).where(User.username == username)):
         raise UserError(f'Username "{username}" is already taken')
     user = User(
-        name=name.strip(),
+        name=name,
         room_number=room_number,
         username=username,
-        password_hash=hash_password(password),
+        password_hash=await hash_password_off_loop(password),
         is_admin=is_admin,
         active=True,
     )
@@ -96,22 +120,25 @@ async def create_initial_admin(session: AsyncSession) -> User | None:
     )
 
 
-async def set_active(session: AsyncSession, user: User, active: bool, today: date) -> None:
-    """Pause or resume a resident. A paused resident's open duties go to someone else."""
+async def set_active(session: AsyncSession, user: User, active: bool, now: datetime) -> None:
+    """Pause or resume a resident. A paused resident's open duties go to someone else, and
+    their open penalty week waits until they are back."""
     user.active = active
     await session.flush()
     if active:
-        await duties.fill_current(session, today)
+        await strikes.check_threshold(session, user.id, now.date())
+        await duties.fill_current(session, now)
     else:
-        await duties.reconcile(session, today)
+        await duties.reconcile(session, now.date())
 
 
-async def delete(session: AsyncSession, user: User, today: date) -> None:
+async def delete(session: AsyncSession, user: User, now: datetime) -> None:
     """Moving out. The person's history stays anonymised; whoever moves in next is a new
     user and starts from zero (score 0, no strikes).
 
     Their open duties go to someone else.
     """
+    today = now.date()
     # Open penalty weeks go with the person, so those weeks get a regular trash duty again.
     open_penalties = await session.scalars(
         select(Trip)
@@ -129,23 +156,32 @@ async def delete(session: AsyncSession, user: User, today: date) -> None:
     await session.flush()
     session.expire_all()
     await duties.reconcile(session, today)
-    await duties.fill_current(session, today)
+    await duties.fill_current(session, now)
 
 
 async def add_away(session: AsyncSession, user: User, start: date, end: date, today: date) -> None:
-    """Mark a resident away from `start` to `end`; open duties in that time are reassigned.
+    """Mark a resident away from `start` to `end`: they aren't chosen during that time.
+
+    A duty they already have stays theirs (the floor speaker can excuse it); an upcoming
+    penalty week moves to their next free week.
 
     Raises:
-        UserError: if the period is reversed or already over.
+        UserError: if the period is reversed, already over or ends too far ahead.
     """
     if end < start:
         raise UserError("The end can't be before the start")
     if end < today:
         raise UserError("Away periods in the past don't change anything any more")
-    session.add(AwayPeriod(user_id=user.id, start_date=start, end_date=end))
+    if end > today + timedelta(days=MAX_AWAY_DAYS_AHEAD):
+        raise UserError(
+            f"Away periods can end at most {MAX_AWAY_DAYS_AHEAD} days from today; "
+            "for longer, ask the floor speaker to pause you"
+        )
+    user_id = user.id
+    session.add(AwayPeriod(user_id=user_id, start_date=start, end_date=end))
     await session.flush()
     session.expire_all()
-    await duties.reconcile(session, today)
+    await duties.reconcile(session, today, keep_user_id=user_id)
 
 
 async def remove_away(session: AsyncSession, away: AwayPeriod) -> None:

@@ -1,5 +1,8 @@
 """Slows down password guessing: too many failed logins block that login for a while.
 
+Two limits: per username and IP (`login_throttle`), and per username over all IPs
+(`account_throttle`, higher).
+
 The failures are kept in memory, so they are per process and reset on restart. That is
 enough for a single small app instance.
 """
@@ -9,6 +12,9 @@ from collections.abc import Callable
 
 MAX_FAILURES = 5
 WINDOW_SECONDS = 15 * 60
+# With more keys than this, expired ones are dropped on the next failure, so made-up
+# usernames can't grow the memory without bound.
+PRUNE_ABOVE_KEYS = 1000
 
 
 class LoginThrottle:
@@ -45,6 +51,9 @@ class LoginThrottle:
 
     def record_failure(self, key: str) -> None:
         """Remember a failed attempt now."""
+        if len(self._failures) > PRUNE_ABOVE_KEYS:
+            for old in list(self._failures):
+                self._recent_failures(old)
         self._failures.setdefault(key, []).append(self._clock())
 
     def reset(self, key: str) -> None:
@@ -62,4 +71,9 @@ class LoginThrottle:
         return recent
 
 
+# Per username and IP.
 login_throttle = LoginThrottle()
+# Per username from all IPs together, against guessing from many addresses. Higher, so an
+# attacker can't lock someone out as easily.
+ACCOUNT_MAX_FAILURES = 20
+account_throttle = LoginThrottle(max_failures=ACCOUNT_MAX_FAILURES)

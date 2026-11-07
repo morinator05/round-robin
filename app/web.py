@@ -22,13 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app import deps
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session, require_user
 from app.formatting import long_date, short_date
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import auth, carpool, duties, jobs, strikes, users
 from app.services.duties import DutyError
-from app.services.login_throttle import login_throttle
+from app.services.login_throttle import account_throttle, login_throttle
 from app.services.users import UserError
 
 public = APIRouter()
@@ -62,8 +63,8 @@ def help_link(topic: str) -> Markup:
     """A small "?" after a heading, linking to that topic on the help page."""
     return Markup(
         '<a class="help-link" href="/help#{}" title="How does this work?" '
-        'aria-label="How does this work?">?</a>'
-    ).format(topic)
+        'aria-label="Help: {}">?</a>'
+    ).format(topic, topic.replace("-", " "))
 
 
 templates.env.globals["person"] = person
@@ -95,17 +96,24 @@ def flash(request: Request, message: str, kind: str = "ok") -> None:
 
 
 def render(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
-    """Render a full page; adds the user, pending messages and today's date."""
-    messages = request.session.pop("flash", [])
+    """Render a full page; adds the user, pending messages and today's date.
+
+    htmx requests that only take a part of the page (the card after "Done", switching the
+    plan) leave the messages queued: they would be dropped unseen. Boosted navigation shows
+    the whole page, so it takes them.
+    """
+    partial = request.headers.get("HX-Request") and not request.headers.get("HX-Boosted")
+    messages = [] if partial else request.session.pop("flash", [])
     return templates.TemplateResponse(
         request, name, {"user": user, "messages": messages, "today": settings.today(), **ctx}
     )
 
 
 def start_session(request: Request, user: User) -> None:
-    """Log `user` in, in this browser."""
+    """Log `user` in, in this browser (for at most `deps.SESSION_MAX_SECONDS`)."""
     request.session["user_id"] = user.id
     request.session["token"] = user.session_token
+    request.session["logged_in_at"] = int(deps.clock())
 
 
 def redirect(url: str) -> RedirectResponse:
@@ -179,10 +187,16 @@ async def login(
     password: Annotated[str, Form()],
     next: Annotated[str, Form()] = "/",
 ):
-    """Log in. Too many failed attempts block the username from that IP for a while."""
+    """Log in. Too many failed attempts block the username from that IP for a while, and
+    (with a higher limit, so others can't easily lock someone out) from everywhere."""
     client_ip = request.client.host if request.client else "unknown"
-    throttle_key = f"{username.strip().lower()}@{client_ip}"
-    if not login_throttle.try_attempt(throttle_key):
+    # No real account has a longer username or password; don't keep or hash such input.
+    if len(username) > users.MAX_USERNAME_LENGTH or len(password) > auth.MAX_PASSWORD_LENGTH:
+        flash(request, "Wrong username or password", "error")
+        return redirect(f"/login?next={safe_next(next)}")
+    name = username.strip().lower()
+    throttle_key, account_key = f"{name}@{client_ip}", f"user:{name}"
+    if not (login_throttle.try_attempt(throttle_key) and account_throttle.try_attempt(account_key)):
         flash(request, auth.TOO_MANY_ATTEMPTS, "error")
         return redirect(f"/login?next={safe_next(next)}")
 
@@ -191,6 +205,7 @@ async def login(
         flash(request, "Wrong username or password", "error")
         return redirect(f"/login?next={safe_next(next)}")
     login_throttle.reset(throttle_key)
+    account_throttle.reset(account_key)
     start_session(request, user)
     return redirect(safe_next(next))
 
@@ -239,7 +254,9 @@ async def dashboard(
 
     choices = [uid for uid in kitchen_preview.plans if uid is not None]
     # Lenient: anything that isn't one of the choices (also "abc") shows the default.
-    chosen = int(cleaner) if cleaner and cleaner.isdigit() else None
+    # isdigit() alone would let "²" through, which int() rejects (as very long numbers).
+    valid = cleaner and cleaner.isascii() and cleaner.isdigit() and len(cleaner) <= 18
+    chosen = int(cleaner) if valid else None
     if chosen not in kitchen_preview.plans:
         chosen = user.id if user.id in choices else next(iter(kitchen_preview.plans))
     kitchen_plan = kitchen_preview.plans[chosen]
@@ -329,13 +346,31 @@ async def add_away(
     start_date: Annotated[date, Form()],
     end_date: Annotated[date, Form()],
 ):
-    """Add an away period for yourself."""
+    """Add an away period for yourself. Says so if a duty you already have falls into it."""
+    user_id, now = user.id, settings.now()
     try:
-        await users.add_away(session, user, start_date, end_date, settings.today())
+        await users.add_away(session, user, start_date, end_date, now.date())
         await session.commit()
-        flash(request, "Away period added")
     except UserError as e:
         flash(request, str(e), "error")
+        return redirect("/me")
+    flash(request, "Away period added")
+    for duty in Duty:
+        trip = await duties.current_trip(session, duty, now)
+        if (
+            trip is not None
+            and trip.start_date <= end_date
+            and start_date <= trip.end_date
+            and any(
+                pd.user_id == user_id and pd.status is Status.pending
+                for pd in trip.potential_drivers
+            )
+        ):
+            flash(
+                request,
+                f"Your current {duty.label.lower()} stays with you; if you can't do it, "
+                "ask the floor speaker to excuse it",
+            )
     return redirect("/me")
 
 
@@ -348,7 +383,8 @@ async def delete_away(request: Request, session: Session, user: CurrentUser, awa
     await users.remove_away(session, away)
     await session.commit()
     flash(request, "Away period deleted")
-    return redirect("/me")
+    # The admin page posts with `next=/admin`.
+    return redirect(safe_next(request.query_params.get("next") or "/me"))
 
 
 @router.post("/me/password")
@@ -363,17 +399,19 @@ async def change_password(
     throttle_key = f"password-change:{user.id}"
     if not login_throttle.try_attempt(throttle_key):
         flash(request, auth.TOO_MANY_ATTEMPTS, "error")
-    elif not await auth.verify_password_off_loop(old_password, user.password_hash):
+    elif len(old_password) > auth.MAX_PASSWORD_LENGTH or not await auth.verify_password_off_loop(
+        old_password, user.password_hash
+    ):
         flash(request, "Old password is wrong", "error")
     else:
         # The old password was right, so the attempt doesn't count, even if the new one
         # is too short.
         login_throttle.reset(throttle_key)
-        if len(new_password) < auth.MIN_PASSWORD_LENGTH:
-            flash(request, auth.PASSWORD_TOO_SHORT, "error")
+        if error := auth.check_password_length(new_password):
+            flash(request, error, "error")
         else:
             # Logs out the other devices; this browser stays logged in.
-            user.password_hash = auth.hash_password(new_password)
+            user.password_hash = await auth.hash_password_off_loop(new_password)
             auth.end_sessions(user)
             await session.commit()
             start_session(request, user)
@@ -387,10 +425,15 @@ HISTORY_DAYS = 28
 
 
 @router.get("/history")
-async def history(request: Request, session: Session, user: CurrentUser, until: date | None = None):
-    """Who drove which trip, `HISTORY_DAYS` days up to `until`."""
+async def history(request: Request, session: Session, user: CurrentUser, until: str | None = None):
+    """Who drove which trip, `HISTORY_DAYS` days up to `until` (lenient: an empty or invalid
+    date shows the latest days)."""
     today = settings.today()
-    until = min(until or today, today)
+    try:
+        day = date.fromisoformat(until) if until else today
+    except ValueError:
+        day = today
+    until = max(min(day, today), date(2000, 1, 1))
     since = until - timedelta(days=HISTORY_DAYS - 1)
     trips = await session.scalars(
         select(Trip)
@@ -433,7 +476,8 @@ async def stats(request: Request, session: Session, user: CurrentUser):
     for uid, duty, is_penalty, status in rows:
         key = (uid, duty, "penalty" if is_penalty else status)
         counts[key] = counts.get(key, 0) + 1
-    active = {u.id: len(await strikes.active_strikes(session, u.id)) for u in all_users}
+    counts_by_user = await strikes.active_counts(session)
+    active = {u.id: counts_by_user.get(u.id, 0) for u in all_users}
     # Whole points per duty instead of fractions; ties go by who is chosen next.
     ids = [u.id for u in all_users]
     rooms = {u.id: u.room_number for u in all_users}
@@ -466,7 +510,6 @@ async def help_page(request: Request, user: CurrentUser):
         kitchen_people=settings.kitchen_people_per_day,
         trash_people=settings.trash_people_per_week,
         deadline_hour=settings.deadline_hour,
-        deadline_days_after=settings.deadline_days_after,
         preview_days=settings.preview_days,
     )
 
@@ -488,6 +531,13 @@ async def admin(request: Request, session: Session, user: AdminUser):
         .order_by(Strike.created_at.desc())
         .limit(50)
     )
+    # Current and upcoming absences of everyone, so unusual ones are noticed.
+    aways = await session.scalars(
+        select(AwayPeriod)
+        .where(AwayPeriod.end_date >= settings.today())
+        .options(selectinload(AwayPeriod.user))
+        .order_by(AwayPeriod.start_date, AwayPeriod.id)
+    )
     return render(
         request,
         "admin/index.html",
@@ -495,6 +545,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         users=all_users,
         trips=list(trips),
         strikes=list(all_strikes),
+        aways=list(aways),
     )
 
 
@@ -519,7 +570,7 @@ async def admin_create_user(
             password=password,
             is_admin=is_admin,
         )
-        await duties.fill_current(session, settings.today())
+        await duties.fill_current(session, settings.now())
         await session.commit()
         flash(request, f"{new.display_name} added")
     except UserError as e:
@@ -548,21 +599,23 @@ async def admin_edit_user(
 ):
     """Change a resident's name, room, password or admin role (not your own role)."""
     target = await _get_user(session, user_id)
-    if password and len(password) < auth.MIN_PASSWORD_LENGTH:
-        flash(request, auth.PASSWORD_TOO_SHORT, "error")
+    if password and (error := auth.check_password_length(password)):
+        flash(request, error, "error")
         return redirect("/admin")
-    if room_number.strip():
-        try:
+    try:
+        if room_number.strip():
             target.room_number = users.check_room(room_number)
-        except UserError as e:
-            flash(request, str(e), "error")
-            return redirect("/admin")
-    target.name = name.strip() or target.name
+        if name.strip():
+            target.name = users.check_name(name)
+    except UserError as e:
+        await session.rollback()
+        flash(request, str(e), "error")
+        return redirect("/admin")
     if target.id != user.id:
         target.is_admin = is_admin
     if password:
         # Whoever knew the old password (or has a session) is logged out.
-        target.password_hash = auth.hash_password(password)
+        target.password_hash = await auth.hash_password_off_loop(password)
         auth.end_sessions(target)
     await session.commit()
     if target.id == user.id:
@@ -575,7 +628,7 @@ async def admin_edit_user(
 async def admin_toggle_active(request: Request, session: Session, user: AdminUser, user_id: int):
     """Pause or resume a resident."""
     target = await _get_user(session, user_id)
-    await users.set_active(session, target, not target.active, settings.today())
+    await users.set_active(session, target, not target.active, settings.now())
     await session.commit()
     flash(request, f"{target.display_name} is now {'active' if target.active else 'inactive'}")
     return redirect("/admin")
@@ -589,7 +642,7 @@ async def admin_delete_user(request: Request, session: Session, user: AdminUser,
         flash(request, "You can't delete yourself", "error")
         return redirect("/admin")
     name = target.display_name
-    await users.delete(session, target, settings.today())
+    await users.delete(session, target, settings.now())
     await session.commit()
     flash(request, f"{name} deleted")
     return redirect("/admin")
@@ -600,11 +653,14 @@ async def admin_issue_strike(
     request: Request,
     session: Session,
     user: AdminUser,
-    user_id: Annotated[int, Form()],
+    user_id: Annotated[str, Form()],
     reason: Annotated[str, Form()],
 ):
     """Give a strike by hand."""
-    target = await _get_user(session, user_id)
+    if not user_id.isdecimal():
+        flash(request, "Choose who gets the strike", "error")
+        return redirect("/admin")
+    target = await _get_user(session, int(user_id))
     await strikes.issue(
         session,
         user_id=target.id,

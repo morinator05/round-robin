@@ -14,17 +14,16 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://a4:a4@localhost:5432/a4"
+    database_url: str = "postgresql+asyncpg://e1:e1@localhost:5432/e1"
     # Signs the login cookie: whoever knows it can log in as anyone. No usable default on purpose.
     secret_key: str = ""
     timezone: str = "Europe/Berlin"
     # Optional, shown in the header and page title: "Round Robin <floor_name>".
     floor_name: str = ""
-    # A duty must be marked done by this hour, `deadline_days_after` days after it ended.
-    # Each day's (on Monday also the week's) potential drivers are chosen at this hour too,
-    # right after the previous duty's deadline, so only one duty is ever open at a time.
+    # A duty must be marked done by this hour on the day after it ended. Each day's (on
+    # Monday also the week's) potential drivers are chosen at this hour too, right after the
+    # previous duty's deadline, so only one duty is ever open at a time.
     deadline_hour: int = 8
-    deadline_days_after: int = 1
     # Potential drivers chosen for each trip (day / week); only one of them has to drive.
     kitchen_people_per_day: int = 2
     trash_people_per_week: int = 1
@@ -32,6 +31,8 @@ class Settings(BaseSettings):
     strike_threshold: int = 3
     # How far ahead the dashboard preview looks.
     preview_days: int = 14
+    # Send the login cookie only over HTTPS. Turn on when the app is behind TLS.
+    secure_cookies: bool = False
     # Off in tests, so no background job touches the test database.
     run_scheduler: bool = True
     # Optional first floor speaker, created on startup while there are no users at all.
@@ -49,6 +50,14 @@ class Settings(BaseSettings):
                 "SECRET_KEY must be a random string of at least 32 characters, "
                 "e.g. from `openssl rand -hex 32`"
             )
+        return value
+
+    @field_validator("deadline_hour")
+    @classmethod
+    def deadline_hour_in_day(cls, value: int) -> int:
+        """An hour of the day, 0-23."""
+        if not 0 <= value <= 23:
+            raise ValueError("DEADLINE_HOUR must be between 0 and 23")
         return value
 
     @cached_property

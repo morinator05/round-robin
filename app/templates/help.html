@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}How it works – {{ super() }}{% endblock %}
 {% block content %}
 <h1>How it works</h1>
 <p>On our floor we share two cleaning duties. This site splits them fairly and keeps track of
@@ -31,10 +32,8 @@
   <h2>Marking a duty as done</h2>
   <p>Once you've cleaned, click <strong>Done</strong> next to your name on the
     <a href="/">overview</a>. Only whoever actually cleaned marks it.</p>
-  <p>Deadline: {{ deadline_hour }}:00
-    {% if deadline_days_after == 1 %}on the day after the duty, so for trash duty the Monday after your week.
-    {% else %}{{ deadline_days_after }} days after the duty.{% endif %}
-    After that the duty counts as missed.</p>
+  <p>Deadline: {{ deadline_hour }}:00 on the day after the duty, so for trash duty the
+    Monday after your week. After that the duty counts as missed.</p>
 </section>
 
 <section class="card help" id="status">
@@ -61,8 +60,9 @@
 <section class="card help" id="away">
   <h2>Away</h2>
   <p>If you're away, e.g. on holiday, add it under <a href="/me">My profile</a> → Away.
-    You won't be assigned during that time, and it doesn't count against you. Duties that fall into
-    that time are taken over by someone else right away.</p>
+    You won't be assigned during that time, and it doesn't count against you. A duty you
+    already have stays yours, so add absences early; if something comes up at short notice,
+    ask the floor speaker to excuse it. A penalty week moves to your next free week.</p>
 </section>
 
 <section class="card help" id="points">

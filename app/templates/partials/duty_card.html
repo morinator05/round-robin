@@ -29,6 +29,8 @@
     {% if driver %}
       <p class="muted foot">Done by {{ person(driver.user) }}
         on {{ driver.completed_at|date_time }}</p>
+    {% elif trip.potential_drivers|selectattr("disputed_at")|first %}
+      <p class="muted foot">Disputed – the floor speaker decides who gets the credit</p>
     {% else %}
       <p class="muted foot">Mark as done by {{ deadline|date_time }}</p>
     {% endif %}

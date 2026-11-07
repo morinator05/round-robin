@@ -178,9 +178,10 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
     if count > len(NAMES):
         sys.exit(f"At most {len(NAMES)} residents supported")
     async with SessionLocal() as session:
-        reset = await reset_open_trips(session, settings.today())
+        # Check before `reset_open_trips`, which commits deletions.
         if days and await session.scalar(select(func.count(Trip.id))):
             sys.exit("--days needs a database without history: docker compose down -v")
+        reset = await reset_open_trips(session, settings.today())
         existing = set(await session.scalars(select(User.username)))
         added = 0
         for i in range(count):

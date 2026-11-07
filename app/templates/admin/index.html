@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% block title %}Floor speaker – {{ super() }}{% endblock %}
 {% block content %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 
@@ -52,10 +53,32 @@
 </section>
 
 <section class="card">
+  <h2>Absences <span class="muted">current and upcoming</span></h2>
+  <div class="table-wrap"><table>
+    <tr><th>Resident</th><th>From</th><th>To</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+    {% for a in aways %}
+      <tr>
+        <td>{{ person(a.user) }}</td>
+        <td>{{ a.start_date|long_date }}</td>
+        <td>{{ a.end_date|long_date }}</td>
+        <td class="end">
+          <form method="post" action="/me/away/{{ a.id }}/delete?next=/admin" class="inline"
+                hx-confirm="Delete this absence of {{ a.user.first_name }}?">
+            <button class="secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}<tr><td class="muted" colspan="4">Nobody is away.</td></tr>{% endfor %}
+  </table></div>
+</section>
+
+<section class="card">
   <h2>Strikes</h2>
-  <form method="post" action="/admin/strikes" class="row">
+  <form method="post" action="/admin/strikes" class="row"
+        hx-confirm="Give this strike? With {{ strike_threshold }} active strikes a penalty week follows right away.">
     <label>Resident
       <select name="user_id" required>
+        <option value="">Choose resident…</option>
         {% for u in users %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
       </select>
     </label>
@@ -72,8 +95,8 @@
         <td>{{ "automatic" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
         <td class="end">
           {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
-          {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">served</span>
           {% else %}
+            {% if s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>{% endif %}
             <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline">
               <button class="secondary">Revoke</button>
             </form>
