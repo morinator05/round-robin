@@ -30,7 +30,7 @@
     {%- endfor %}</span>
     <span class="part">Next trash: {% if y.trash_next %}<span class="nowrap">{% if y.trash_next.start == today %}this week, from today {{ starts }}{% else %}{{ y.trash_next.start|short_date }}–{{ y.trash_next.end|short_date }}{% endif %}</span>{% else %}not in the next {{ preview_days }} days{% endif %}</span>
   {%- endif %}
-  {% if y.strikes %}<a class="part" href="/me">{{ y.strikes }} of {{ strike_threshold }} strikes</a>{% endif %}
+  {% if y.strikes %}<span class="part"><a href="/me">{{ y.strikes }} of {{ strike_threshold }} strikes</a> – at {{ strike_threshold }}: an extra trash week</span>{% endif %}
   {% if y.is_new %}<span class="part">New here? <a href="/help">Read How it works</a></span>{% endif %}
 </p>
 <div class="grid duties">
@@ -64,13 +64,13 @@
       {% set is_today = kitchen_open_start == today %}
       {% set when = "today" if is_today else ("yesterday" if kitchen_open_start == yesterday else "on " ~ (kitchen_open_start|weekday) ~ " " ~ (kitchen_open_start|short_date)) %}
       <div class="plan-switch" role="group" aria-labelledby="plan-switch-label">
-        <span class="muted" id="plan-switch-label">The plan depends on who {{ "cleans" if is_today else "cleaned" }} {{ when }}:</span>
+        <span class="muted" id="plan-switch-label">The plan depends on who {{ "cleans" if is_today else "cleaned" }} {{ when }} (this only changes the preview):</span>
         {% for u in kitchen_choices %}
           <a id="plan-{{ u.id }}" href="/?cleaner={{ u.id }}" hx-get="/?cleaner={{ u.id }}" hx-select="#kitchen-preview"
              hx-target="#kitchen-preview" hx-swap="outerHTML" hx-push-url="true"
              {% if u.id == kitchen_cleaner %}aria-current="true"{% endif %}>
-            {%- if user and u.id == user.id %}If you {{ "clean" if is_today else "cleaned" }}
-            {%- else %}If {{ person(u) }} {{ "cleans" if is_today else "cleaned" }}{% endif -%}
+            {%- if user and u.id == user.id %}Plan if you {{ "clean" if is_today else "cleaned" }}
+            {%- else %}Plan if {{ person(u) }} {{ "cleans" if is_today else "cleaned" }}{% endif -%}
           </a>
         {% endfor %}
       </div>

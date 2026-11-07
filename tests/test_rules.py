@@ -1304,7 +1304,9 @@ async def test_dashboard_switches_between_plans(session, client, midday):
     await client.post("/logout")
     await login(client, p2.username)
     assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
-    assert "If you clean" in (await client.get("/")).text
+    page = (await client.get("/")).text
+    # The buttons only switch the preview; they don't report anything.
+    assert "Plan if you clean" in page and "only changes the preview" in page
     # Anything that isn't an id falls back too, instead of an error page.
     r = await client.get("/?cleaner=abc")
     assert r.status_code == 200 and current(r.text) == [str(p2.id)]
@@ -1383,6 +1385,8 @@ async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
     await session.commit()
     line = you_line((await client.get("/")).text)
     assert f"1 of {settings.strike_threshold} strikes" in line and 'href="/me"' in line
+    # What happens at the limit, right there.
+    assert f"at {settings.strike_threshold}: an extra trash week" in line
 
     # After cleaning: thanks, also when you're on trash duty this week as well.
     await client.post("/logout")
@@ -1894,6 +1898,7 @@ async def test_profile_puts_strikes_first_and_password_last(session, client):
     ]
     assert order == sorted(order)
     assert "Duties you already have stay yours" in page
+    assert f"At {settings.strike_threshold} strikes you get a penalty trash week" in page
     assert 'hx-confirm="Delete your absence from' in page
 
 
@@ -2091,6 +2096,7 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     assert "disabled>I emptied it</button>" in page and "Can be marked again from" in page
     assert 'hx-post="/dishwasher?card=1"' not in page and 'badge s-drove">done' not in page
     assert "You emptied it once this month" in page and "Optional:" not in page
+    assert "Last emptied by you today" in page
     # Too soon: the page reloads to show why.
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.headers.get("hx-refresh") == "true"

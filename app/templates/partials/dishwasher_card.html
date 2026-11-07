@@ -18,7 +18,7 @@
     {% endif %}
   </div>
   <p class="muted foot">
-    {% if d.last %}Last emptied by {{ person(d.last.user) }}
+    {% if d.last %}Last emptied by {% if d.last.user_id == user.id %}you{% else %}{{ person(d.last.user) }}{% endif %}
       {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}.
     {%- else %}Nobody has emptied it yet.{% endif %}
     {% if d.next_allowed and d.state != "inactive" %}Can be marked again from {{ d.next_allowed|clock }}.{% endif %}
