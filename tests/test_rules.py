@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import html
 import json
 import random
 import re
@@ -1701,6 +1702,85 @@ async def test_login_is_limited_per_account_across_ips(session, monkeypatch):
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         r = await c.post("/login", data={"username": "p2", "password": "secret123"})
         assert "Too many failed attempts" in (await c.get(r.headers["location"])).text
+
+
+async def test_admin_enters_an_absence_for_a_resident(session, client):
+    people = await make_users(session, n=4)
+    resident = people[2]
+    later = settings.today() + timedelta(days=5)
+    form = {
+        "user_id": str(resident.id),
+        "start_date": later.isoformat(),
+        "end_date": (later + timedelta(days=2)).isoformat(),
+    }
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    assert 'action="/admin/aways"' in page
+    r = await client.post("/admin/aways", data=form)
+    assert r.status_code == 303 and r.headers["location"] == "/admin"
+    assert f"Away period added for {resident.display_name}" in (await client.get("/admin")).text
+    assert await session.scalar(select(AwayPeriod.user_id)) == resident.id
+
+    # A wrong period comes back as a message.
+    await client.post("/admin/aways", data={**form, "end_date": settings.today().isoformat()})
+    assert "The end can't be before the start" in html.unescape((await client.get("/admin")).text)
+
+    # Residents can't enter absences for others.
+    await client.post("/logout")
+    await login(client, "p2")
+    assert (await client.post("/admin/aways", data=form)).status_code == 403
+
+
+async def test_admin_page_has_the_frequent_tasks_first(session, client):
+    people = await make_users(session, n=4)
+    _, first, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    sections = ["duties", "strikes", "absences", "dishwasher", "residents"]
+    positions = [page.index(f'<section class="card" id="{s}"') for s in sections]
+    assert positions == sorted(positions)
+    # A jump bar at the top, with what's waiting: today's kitchen pair and trash person.
+    jump = page.split('class="jump"')[1].split("</div>")[0]
+    # Not a <nav>: that would get the look of the main menu bar.
+    assert '<nav class="jump"' not in page
+    assert all(f'href="#{s}"' in jump for s in sections)
+    assert "3 open" in jump
+    assert "last 14 days</span>" in page and "and planned" not in page
+    assert "Runs by itself every day at" in page
+
+
+async def test_admin_confirmations_name_the_person(session, client):
+    people = await make_users(session, n=4)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await strikes.issue(session, user_id=people[3].id, reason="test", today=settings.today())
+    await session.commit()
+    await login(client, "p1")
+    page = html.unescape((await client.get("/admin")).text)
+    name = (p1 if first.user_id == p1.id else p2).display_name
+    assert f"hx-confirm=\"Excuse {name}'s kitchen duty on" in page
+    assert f"hx-confirm=\"Revoke {people[3].display_name}'s strike from" in page
+    assert f'hx-confirm="Pause {people[3].display_name}?' in page
+
+    await client.post(f"/potential-drivers/{first.id}/drove?next=/admin")
+    page = html.unescape((await client.get("/admin")).text)
+    assert f"hx-confirm=\"Dispute {name}'s kitchen duty on" in page
+
+
+async def test_admin_folds_revoked_strikes(session, client):
+    people = await make_users(session, n=3)
+    kept = await strikes.issue(
+        session, user_id=people[1].id, reason="still on", today=settings.today()
+    )
+    gone = await strikes.issue(
+        session, user_id=people[2].id, reason="taken back", today=settings.today()
+    )
+    await strikes.revoke(session, gone, settings.now())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    folded = page.split("1 revoked or used")[1].split("</details>")[0]
+    assert "taken back" in folded and "still on" not in folded
+    assert kept.reason in page
 
 
 async def test_admin_sees_and_deletes_absences(session, client):

@@ -299,6 +299,12 @@ table.history .col-action { width: 9rem; }
 .flash { padding: .65rem 1rem .55rem; margin-bottom: .75rem;
          color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
 .flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+/* The message stays in view when the page scrolls back to the section that was changed
+   (admin page); a success message fades after a few seconds, an error stays. */
+.flash { position: sticky; top: .5rem; z-index: 5; box-shadow: var(--shadow); }
+.flash.ok { animation: flash-out .4s ease-in 5s forwards; }
+@keyframes flash-out { to { opacity: 0; visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .flash.ok { animation-duration: 0s; animation-delay: 8s; } }
 
 /* --- "?" after a heading: a small square link to that topic on the help page. */
 .help-link { display: inline-grid; place-content: center; width: 1.4em; height: 1.4em;
@@ -316,6 +322,19 @@ table.history .col-action { width: 9rem; }
 .card.help .table-wrap { margin-top: .25rem; }
 main > p { max-width: 68ch; }
 
+/* --- Admin: a bar of links to the sections, with what's waiting in each. */
+.jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.5rem 0 1.25rem; }
+/* Sections scrolled into view (jump bar, after an action) stop below the sticky message. */
+main > section[id] { scroll-margin-top: 4rem; }
+.jump a { padding: .35rem .7rem .25rem; text-decoration: none; font-weight: 600;
+          color: var(--accent-strong); background: var(--card); border: 1px solid var(--border); }
+.jump a:hover { border-color: var(--accent); }
+.jump .muted { font-weight: 400; margin-left: .2rem; }
+/* Revoked and used strikes, folded under the active ones. */
+details.older { margin-top: .75rem; }
+details.older > summary { padding: .25rem 0 .6rem; color: var(--accent); font-weight: 600; }
+/* "Run daily job now" with the note when it runs by itself. */
+form.actions .muted { margin-left: .6rem; font-size: .9rem; }
 /* --- Admin: "add a resident" and one line per resident, each folding out its forms. */
 details summary { cursor: pointer; }
 details.add > summary { padding: .25rem 0 .9rem; color: var(--accent); font-weight: 700; }
@@ -348,9 +367,23 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   .card .table-wrap table.compact { min-width: 0; }
   table.compact th, table.compact td { padding-left: .55rem; padding-right: .55rem; }
   table.compact td:first-child { white-space: normal; }
-  /* Admin duties: the date may take two lines, so the names keep room; scrolls sideways. */
-  .card .table-wrap table.trips { min-width: 42rem; }
-  table.trips .col-date { width: 7.5rem; }
+  /* Admin duties and strikes: each row stacked into the screen width instead of a wide
+     table, so every button can be reached without scrolling sideways. */
+  .card .table-wrap table.trips, .card .table-wrap table.strike-list { min-width: 0; }
+  table.trips, table.trips tbody, table.strike-list, table.strike-list tbody { display: block; }
+  table.trips thead, table.trips colgroup, table.strike-list tr:first-child:has(th) { display: none; }
+  table.trips tr, table.strike-list tr { display: grid; grid-template-columns: 1fr auto;
+                                     align-items: center; gap: .35rem .6rem; padding: .55rem .7rem; }
+  table.trips td, table.strike-list td { display: block; padding: 0; border: 0; white-space: normal; }
+  table.trips tbody.trip + tbody.trip, table.strike-list tr + tr { border-top: 1px solid var(--border); }
+  /* The cells' own lines from the wide table don't belong in the stacked one. */
+  table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 0; }
+  /* Duties: the date heads the trip; per resident the name and status, buttons below. */
+  table.trips td[rowspan] { grid-column: 1 / -1; padding: 0; font-weight: 600; }
+  table.trips td.end { grid-column: 1 / -1; }
+  /* Strikes: date, resident, reason and who gave it stacked; status or Revoke on the right. */
+  table.strike-list td.end { grid-column: 2; grid-row: 1 / span 4; }
+  table.strike-list td:not(.end) { grid-column: 1; }
   /* My profile: "Add" across the whole card, below the dates. */
   .away-form button { flex-basis: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */

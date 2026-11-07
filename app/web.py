@@ -82,6 +82,7 @@ templates.env.globals["help_link"] = help_link
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
+templates.env.globals["deadline_hour"] = settings.deadline_hour
 templates.env.globals["dishwasher_cooldown"] = settings.dishwasher_cooldown_minutes
 templates.env.globals["dishwasher_heroes"] = settings.dishwasher_heroes
 templates.env.globals["floor_name"] = settings.floor_name
@@ -844,6 +845,31 @@ async def admin_issue_strike(
     )
     await session.commit()
     flash(request, f"Strike given to {target.display_name}")
+    return redirect("/admin")
+
+
+@router.post("/admin/aways")
+async def admin_add_away(
+    request: Request,
+    session: Session,
+    user: AdminUser,
+    user_id: Annotated[str, Form()],
+    start_date: Annotated[date, Form()],
+    end_date: Annotated[date, Form()],
+):
+    """Enter an away period for a resident (who told the floor speaker in person)."""
+    if not user_id.isdecimal():
+        flash(request, "Choose who is away", "error")
+        return redirect("/admin")
+    target = await _get_user(session, int(user_id))
+    name = target.display_name
+    try:
+        await users.add_away(session, target, start_date, end_date, settings.today())
+        await session.commit()
+    except UserError as e:
+        flash(request, str(e), "error")
+        return redirect("/admin")
+    flash(request, f"Away period added for {name}")
     return redirect("/admin")
 
 

@@ -73,7 +73,8 @@ week.
 - Mark any duty done (also after the deadline), excuse it ("Excuse": no strike, no
   credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
   gets a strike).
-- Give and revoke strikes; delete wrong dishwasher entries; run the daily job by hand.
+- Give and revoke strikes; enter absences for residents; delete wrong dishwasher entries;
+  run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `E103`: building, floor, room 01–99.
