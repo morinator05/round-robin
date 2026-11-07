@@ -6,11 +6,11 @@ gets a month off kitchen duty. The UI is in English.
 
 ## Screenshots
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-light.png" width="820" alt="Overview: today's kitchen and trash duty and the plan for the next 14 days"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png"><img src="docs/screenshots/overview-light.png" width="820" alt="Overview: today's kitchen and trash duty, the dishwasher, and the plan for the next 14 days"></picture>
 
 | Statistics | History |
 |---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/statistics-dark.png"><img src="docs/screenshots/statistics-light.png" width="400" alt="Statistics"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history-light.png" width="400" alt="History"></picture> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/statistics-dark.png"><img src="docs/screenshots/statistics-light.png" width="400" alt="Statistics, with this month's dishwasher count"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/history-dark.png"><img src="docs/screenshots/history-light.png" width="400" alt="History"></picture> |
 | **My profile** | **Admin** |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/profile-dark.png"><img src="docs/screenshots/profile-light.png" width="400" alt="My profile"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/admin-dark.png"><img src="docs/screenshots/admin-light.png" width="400" alt="Admin"></picture> |
 
