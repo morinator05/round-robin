@@ -2,10 +2,11 @@
 {% block title %}Statistics – {{ super() }}{% endblock %}
 {% block content %}
 <h1>Statistics {{ help_link("points") }}</h1>
-{# Where you stand, in words: 100 points are one duty. "On par" within a quarter duty. #}
+{# Where you stand, in duties with the table's sign (100 points are one duty), and in
+   plain words. "On par" within a quarter duty. #}
 {% macro stand(p) -%}
-  {%- if p >= 25 %}{{ "%.1f"|format(p / 100) }} duties ahead
-  {%- elif p <= -25 %}{{ "%.1f"|format(-p / 100) }} duties behind – you're due soon
+  {%- if p >= 25 %}+{{ "%.1f"|format(p / 100) }} duties (more than your share)
+  {%- elif p <= -25 %}−{{ "%.1f"|format(-p / 100) }} duties (less than your share – you're due soon)
   {%- else %}on par{% endif -%}
 {%- endmacro %}
 <p class="you" id="you">

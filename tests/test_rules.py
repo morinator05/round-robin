@@ -1905,7 +1905,8 @@ async def test_stats_say_where_you_stand(session, client):
     page = text(await client.get("/stats"))
     you = re.sub(r"<[^>]+>", "", page.split('id="you"')[1].split("</p>")[0])
     # p1 cleaned once with 3 riders: two thirds of a duty ahead in the kitchen.
-    assert "Kitchen: 0.7 duties ahead" in you and "Trash: on par" in you
+    # One unit with the table (signed duties), in plain words.
+    assert "Kitchen: +0.7 duties (more than your share)" in you and "Trash: on par" in you
     assert f"Strikes: 1 of {settings.strike_threshold}" in you
     # The counts are hidden on phones; the table says so there.
     assert 'class="num count"' in page and "More columns on a wider screen" in page
