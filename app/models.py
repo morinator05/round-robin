@@ -177,6 +177,9 @@ class PotentialDriver(Base):
     completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     # Set when the floor speaker found it was marked done but not actually done.
     disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Set when the floor speaker decided a missed duty stays missed (the strike stands); it
+    # then no longer needs their attention.
+    kept_missed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     trip: Mapped[Trip] = relationship(back_populates="potential_drivers")
     user: Mapped[User | None] = relationship(foreign_keys=[user_id])

@@ -1871,6 +1871,69 @@ async def test_used_strike_says_penalty_week_next_to_its_reason(session, client)
     assert "penalty week" not in status and "Revoke" in status
 
 
+async def test_keep_missed_takes_it_off_needs_attention(session, client, midday):
+    people = await make_users(session, n=4)
+    # Yesterday's kitchen duty nobody marked: missed by now, with a strike each.
+    _, late, other, late_user, _ = await kitchen_pair(
+        session, people, settings.today() - timedelta(days=1)
+    )
+    await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = html.unescape((await client.get("/admin")).text)
+    overdue = page.split('id="attention"')[1].split("Still open")[0]
+    keep = f'action="/admin/potential-drivers/{late.id}/keep-missed"'
+    assert keep in overdue and ">Keep missed</button>" in overdue
+    # Only in the list that asks for a decision, not on every line of the duties table.
+    duties_block = page.split('id="duties"')[1].split("</section>")[0]
+    assert "keep-missed" not in duties_block
+    count = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
+
+    r = await client.post(f"/admin/potential-drivers/{late.id}/keep-missed")
+    assert r.status_code == 303 and r.headers["location"] == "/admin"
+    page = html.unescape((await client.get("/admin")).text)
+    assert "Kept as missed, the strike stays" in page
+    block = page.split('id="attention"')[1].split("</section>")[0]
+    assert f"/admin/potential-drivers/{late.id}/" not in block
+    assert f"/admin/potential-drivers/{other.id}/keep-missed" in block
+    # Still in the duties table, where it can be marked done or excused after all.
+    duties_block = page.split('id="duties"')[1].split("</section>")[0]
+    assert f"/admin/potential-drivers/{late.id}/excuse" in duties_block
+    after = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
+    assert int(after.group(1)) == int(count.group(1)) - 1
+    # Nothing else changes: still missed, the strike stays.
+    await session.refresh(late)
+    assert late.status is Status.missed and late.kept_missed_at is not None
+    active = await session.scalar(
+        select(func.count())
+        .select_from(Strike)
+        .where(Strike.user_id == late_user.id, Strike.revoked_at.is_(None))
+    )
+    assert active == 1
+
+
+async def test_keep_missed_only_for_the_floor_speaker_and_missed_duties(session):
+    people = await make_users(session, n=4)
+    _, first, _, _, _ = await kitchen_pair(session, people)
+    with pytest.raises(DutyError, match="Only missed duties"):
+        await duties.keep_missed(session, first, people[0], at(MONDAY, 12))
+    first.status = Status.missed
+    with pytest.raises(DutyError, match="Only the floor speaker"):
+        await duties.keep_missed(session, first, people[1], at(MONDAY, 12))
+
+
+async def test_dishwasher_table_has_the_count_at_the_right(session, client):
+    people = await make_users(session, n=3)
+    await dishwasher.mark_cleared(session, people[1], settings.now())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/stats")).text
+    table = page.split('id="dishwasher"')[1].split("</table>")[0]
+    # Two columns: the name (with the hero tag next to it) and the count.
+    assert table.count("<th") == 2
+    row = table.split("<td")[1:]
+    assert len(row) == 2 and "on track for" in row[0] and 'class="num' in row[1]
+
+
 async def test_give_strike_confirm_names_the_resident(session, client):
     await make_users(session, n=3)
     await login(client, "p1")

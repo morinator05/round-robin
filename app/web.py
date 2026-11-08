@@ -942,6 +942,21 @@ async def admin_excuse(
     return redirect("/admin")
 
 
+@router.post("/admin/potential-drivers/{potential_driver_id}/keep-missed")
+async def admin_keep_missed(
+    request: Request, session: Session, user: AdminUser, potential_driver_id: int
+):
+    """Leave a missed duty as it is (the strike stays) and take it off "Needs attention"."""
+    try:
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.keep_missed(session, pd, user, settings.now())
+        await session.commit()
+        flash(request, "Kept as missed, the strike stays")
+    except DutyError as e:
+        flash(request, str(e), "error")
+    return redirect("/admin")
+
+
 @router.post("/admin/potential-drivers/{potential_driver_id}/dispute")
 async def admin_dispute(
     request: Request, session: Session, user: AdminUser, potential_driver_id: int

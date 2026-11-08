@@ -7,8 +7,9 @@
 {% macro name(u) %}{{ u.display_name if u else "the former resident" }}{% endmacro %}
 {% macro when(trip) %}{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% endmacro %}
 {# The buttons for one person on a duty: Done while nobody has, Undo for a moment after,
-   Dispute a done one, Excuse an open or missed one. #}
-{% macro duty_actions(pd, trip) %}
+   Dispute a done one, Excuse an open or missed one, and (with `keep`, in "Needs attention")
+   Keep missed to leave a missed one as it is. #}
+{% macro duty_actions(pd, trip, keep=false) %}
   {%- set what = trip.duty.label|lower ~ " on " ~ when(trip) %}
   {%- if not trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
     <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
@@ -28,17 +29,22 @@
           hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? {{ "No credit. Their strike for it is taken back." if pd.status == Status.missed else "No strike, no credit." }}">
       <button class="secondary">Excuse</button></form>
   {%- endif %}
+  {%- if keep and pd.status == Status.missed %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/keep-missed" class="inline">
+      <button class="secondary">Keep missed</button></form>
+  {%- endif %}
 {%- endmacro %}
 {% set all_pds = trips|map(attribute="potential_drivers")|sum(start=[]) %}
 {% set todo = all_pds|selectattr("status", "in", [Status.pending, Status.missed])|list %}
 {% set active_strikes = strikes|rejectattr("revoked_at")|rejectattr("redeemed_by_trip_id")|list %}
 {% set old_strikes = strikes|reject("in", active_strikes)|list %}
-{# Overdue: missed (and not disputed), a strike was given, a decision is needed. Still open:
-   not marked yet but in time; a duty that hasn't started (a coming penalty week) isn't. #}
+{# Overdue: missed (not disputed, not kept as missed), a strike was given, a decision is
+   needed. Still open: not marked yet but in time; a duty that hasn't started (a coming
+   penalty week) isn't. #}
 {% set overdue = [] %}
 {% set open_now = [] %}
 {% for trip in trips %}{% for pd in trip.potential_drivers %}
-  {% if pd.status == Status.missed and not pd.disputed_at %}{% set _ = overdue.append((trip, pd)) %}
+  {% if pd.status == Status.missed and not pd.disputed_at and not pd.kept_missed_at %}{% set _ = overdue.append((trip, pd)) %}
   {% elif pd.status == Status.pending and trip.start_date <= today %}{% set _ = open_now.append((trip, pd)) %}{% endif %}
 {% endfor %}{% endfor %}
 {% set waiting = overdue + open_now %}
@@ -60,7 +66,7 @@
 <section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
   <h2>Needs attention</h2>
   {% if not waiting and not near %}<p class="muted">Nothing needs attention.</p>{% endif %}
-  {% macro attention_list(title, rows, note) %}
+  {% macro attention_list(title, rows, note, keep=false) %}
     <h3>{{ title }}</h3>
     <div class="table-wrap"><table class="trips attention">
       <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
@@ -70,12 +76,12 @@
           <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
           <td>{{ person(pd.user) }}{% if note %} <span class="muted">{{ note }}</span>{% endif %}</td>
           <td>{% include "partials/status.html" %}</td>
-          <td class="end">{{ duty_actions(pd, trip) }}</td>
+          <td class="end">{{ duty_actions(pd, trip, keep) }}</td>
         </tr></tbody>
       {% endfor %}
     </table></div>
   {% endmacro %}
-  {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given") }}{% endif %}
+  {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given", keep=true) }}{% endif %}
   {% if open_now %}{{ attention_list("Still open – in time, nothing to do yet", open_now, none) }}{% endif %}
   {% if near %}
     <p class="near">One strike or less before a penalty week:

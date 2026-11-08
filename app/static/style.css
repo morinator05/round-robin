@@ -289,6 +289,10 @@ table.trips { table-layout: fixed; min-width: 46rem; }
 table.trips .col-date { width: 11rem; }
 table.trips .col-status { width: 8.5rem; }
 table.trips .col-action { width: 16rem; }
+/* "Needs attention": room for Done, Excuse and Keep missed. The buttons start at the left,
+   so Done and Excuse stand in the same place in both lists. */
+table.attention .col-action { width: 24rem; }
+table.attention td.end { text-align: left; }
 table.trips tbody.trip td { border-bottom: 0; }
 table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
 table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
@@ -448,6 +452,12 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   /* Duties: the date heads the trip; per resident the name and status, buttons below. */
   table.trips td[rowspan] { grid-column: 1 / -1; padding: 0; font-weight: 600; }
   table.trips td.end { grid-column: 1 / -1; }
+  /* Stacked lines have no common height to keep. */
+  table.trips td.end::after { content: none; }
+  /* "Needs attention": the buttons fill the width, Keep missed on a line of its own. */
+  table.attention td.end { display: flex; flex-wrap: wrap; gap: .4rem; }
+  table.attention td.end form.inline { flex: 1 1 auto; margin: 0; }
+  table.attention td.end button { width: 100%; }
   /* Strikes: date, resident, reason and who gave it stacked; status or Revoke on the right. */
   table.strike-list td.end { grid-column: 2; grid-row: 1 / span 4; }
   table.strike-list td:not(.end) { grid-column: 1; }

@@ -73,7 +73,8 @@ week.
   floor speaker role.
 - Mark any duty done (also after the deadline), excuse it ("Excuse": no strike, no
   credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
-  gets a strike).
+  gets a strike). A missed duty can also just stay missed ("Keep missed": the strike stays
+  and it leaves "Needs attention"; it can still be marked done or excused later).
 - Give and revoke strikes; enter absences for residents; delete wrong dishwasher entries;
   run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).

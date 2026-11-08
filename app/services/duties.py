@@ -499,6 +499,23 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
     await session.flush()
 
 
+async def keep_missed(
+    session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime
+) -> None:
+    """Admin only: a missed duty stays missed and its strike stays; it just no longer needs
+    the floor speaker's attention. It can still be marked done or excused later.
+
+    Raises:
+        DutyError: if `actor` isn't the floor speaker or the duty isn't missed.
+    """
+    if not actor.is_admin:
+        raise DutyError("Only the floor speaker can decide about missed duties")
+    if pd.status is not Status.missed:
+        raise DutyError("Only missed duties can be kept as missed")
+    pd.kept_missed_at = now
+    await session.flush()
+
+
 async def dispute(session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime) -> None:
     """Admin only: marked as driven but not actually done. The driver gets a strike.
 
