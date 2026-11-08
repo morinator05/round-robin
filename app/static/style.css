@@ -337,11 +337,11 @@ main > p { max-width: 68ch; }
          position: sticky; top: 0; z-index: 4; padding: .5rem 0; background: var(--bg); }
 /* "Needs attention": the residents close to a penalty week, under the open duties. */
 #attention .near { margin: .75rem 0 0; }
-/* On a phone, one row that scrolls sideways, so the sticky bar doesn't take the screen. */
+/* On a phone: small chips in two rows, so all six links show and the sticky bar stays
+   low; the counts as bare numbers. */
 @media (max-width: 600px) {
-  .jump { flex-wrap: nowrap; overflow-x: auto; margin-left: -16px; margin-right: -16px;
-          padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
-  .jump a { flex: none; }
+  .jump { gap: .3rem; padding: .4rem 0; }
+  .jump a { padding: .25rem .5rem .15rem; font-size: .8rem; }
 }
 /* Sections scrolled into view (jump bar, after an action) stop below the sticky message. */
 main > section[id] { scroll-margin-top: 5.5rem; }

@@ -1806,7 +1806,7 @@ async def test_admin_page_has_the_frequent_tasks_first(session, client):
     # Not a <nav>: that would get the look of the main menu bar.
     assert '<nav class="jump"' not in page
     assert all(f'href="#{s}"' in jump for s in sections)
-    assert "3 open" in jump
+    assert "3 open" in re.sub(r"<[^>]+>", "", jump)
     assert "last 14 days</span>" in page and "and planned" not in page
     assert "Runs by itself every day at" in page
 
@@ -1817,17 +1817,30 @@ async def test_admin_sees_what_needs_attention(session, client, midday):
     # Nothing yet: says so.
     assert "Nothing needs attention." in (await client.get("/admin")).text
 
+    # Yesterday's kitchen duty nobody marked (missed by now), and today's (still open).
+    _, late1, late2, _, _ = await kitchen_pair(
+        session, people, settings.today() - timedelta(days=1)
+    )
     _, first, second, _, _ = await kitchen_pair(session, people, settings.today())
     trash = await duties.get_trip(session, Duty.trash, settings.today())
     for _ in range(settings.strike_threshold - 1):
         await strikes.issue(session, user_id=people[3].id, reason="x", today=settings.today())
     await session.commit()
-    page = (await client.get("/admin")).text
+    page = html.unescape((await client.get("/admin")).text)
     block = page.split('id="attention"')[1].split("</section>")[0]
-    # Today's open duties with their buttons, and who is one strike before a penalty week.
+    # Two lists: overdue (a decision is needed, a strike was given) and still open in time.
+    overdue = block.split("Overdue")[1].split("Still open")[0]
+    still_open = block.split("Still open")[1]
+    for pd in [late1, late2]:
+        assert f"/admin/potential-drivers/{pd.id}/excuse" in overdue
+        assert f"/admin/potential-drivers/{pd.id}/excuse" not in still_open
+    assert "strike given" in overdue and "Their strike for it is taken back" in overdue
     for pd in [first, second, *trash.potential_drivers]:
-        assert f"/admin/potential-drivers/{pd.id}/excuse" in block
-        assert f"/potential-drivers/{pd.id}/drove?next=/admin" in block
+        assert f"/admin/potential-drivers/{pd.id}/excuse" in still_open
+        assert f"/potential-drivers/{pd.id}/drove?next=/admin" in still_open
+    assert "No strike, no credit" in still_open
+    # The daily job says what it does before it runs.
+    assert 'hx-confirm="Run the daily job now? It marks overdue duties missed' in page
     near = block.split("before a penalty week:")[1]
     assert f"{people[3].room_number}</span>" in near and 'href="#strikes">2 of 3' in near
     assert "Nothing needs attention." not in block

@@ -25,7 +25,7 @@
   {%- endif %}
   {%- if pd.status in (Status.pending, Status.missed) %}
     <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline"
-          hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? No strike, no credit.">
+          hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? {{ "No credit. Their strike for it is taken back." if pd.status == Status.missed else "No strike, no credit." }}">
       <button class="secondary">Excuse</button></form>
   {%- endif %}
 {%- endmacro %}
@@ -33,11 +33,15 @@
 {% set todo = all_pds|selectattr("status", "in", [Status.pending, Status.missed])|list %}
 {% set active_strikes = strikes|rejectattr("revoked_at")|rejectattr("redeemed_by_trip_id")|list %}
 {% set old_strikes = strikes|reject("in", active_strikes)|list %}
-{% set waiting = [] %}
+{# Overdue: missed (and not disputed), a strike was given, a decision is needed. Still open:
+   not marked yet but in time; a duty that hasn't started (a coming penalty week) isn't. #}
+{% set overdue = [] %}
+{% set open_now = [] %}
 {% for trip in trips %}{% for pd in trip.potential_drivers %}
-  {% if pd.status == Status.pending or (pd.status == Status.missed and not pd.disputed_at) %}
-    {% set _ = waiting.append((trip, pd)) %}{% endif %}
+  {% if pd.status == Status.missed and not pd.disputed_at %}{% set _ = overdue.append((trip, pd)) %}
+  {% elif pd.status == Status.pending and trip.start_date <= today %}{% set _ = open_now.append((trip, pd)) %}{% endif %}
 {% endfor %}{% endfor %}
+{% set waiting = overdue + open_now %}
 {% set near = [] %}
 {% for u in users %}
   {% set n = active_strikes|selectattr("user_id", "equalto", u.id)|list|length %}
@@ -46,30 +50,33 @@
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 <div class="jump" role="navigation" aria-label="Sections">
   <a href="#attention">Needs attention <span class="muted">{{ waiting|length + near|length }}</span></a>
-  <a href="#duties">Duties <span class="muted">{{ todo|length }} open or missed</span></a>
-  <a href="#strikes">Strikes <span class="muted">{{ active_strikes|length }} active</span></a>
+  <a href="#duties">Duties <span class="muted">{{ todo|length }}<span class="wide-only"> open or missed</span></span></a>
+  <a href="#strikes">Strikes <span class="muted">{{ active_strikes|length }}<span class="wide-only"> active</span></span></a>
   <a href="#absences">Absences <span class="muted">{{ aways|length }}</span></a>
   <a href="#dishwasher">Dishwasher <span class="muted">{{ dishwasher_clears|length }}</span></a>
-  <a href="#residents">Residents <span class="muted">{{ users|selectattr("active")|list|length }} active</span></a>
+  <a href="#residents">Residents <span class="muted">{{ users|selectattr("active")|list|length }}<span class="wide-only"> active</span></span></a>
 </div>
 
 <section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
   <h2>Needs attention</h2>
   {% if not waiting and not near %}<p class="muted">Nothing needs attention.</p>{% endif %}
-  {% if waiting %}
-  <div class="table-wrap"><table class="trips attention">
-    <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
-    <thead><tr><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
-    {% for trip, pd in waiting %}
-      <tbody class="trip"><tr>
-        <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
-        <td>{{ person(pd.user) }}</td>
-        <td>{% include "partials/status.html" %}</td>
-        <td class="end">{{ duty_actions(pd, trip) }}</td>
-      </tr></tbody>
-    {% endfor %}
-  </table></div>
-  {% endif %}
+  {% macro attention_list(title, rows, note) %}
+    <h3>{{ title }}</h3>
+    <div class="table-wrap"><table class="trips attention">
+      <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+      <thead><tr><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+      {% for trip, pd in rows %}
+        <tbody class="trip"><tr>
+          <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
+          <td>{{ person(pd.user) }}{% if note %} <span class="muted">{{ note }}</span>{% endif %}</td>
+          <td>{% include "partials/status.html" %}</td>
+          <td class="end">{{ duty_actions(pd, trip) }}</td>
+        </tr></tbody>
+      {% endfor %}
+    </table></div>
+  {% endmacro %}
+  {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given") }}{% endif %}
+  {% if open_now %}{{ attention_list("Still open – in time, nothing to do yet", open_now, none) }}{% endif %}
   {% if near %}
     <p class="near">One strike or less before a penalty week:
       {% for u, n in near %}{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
@@ -103,7 +110,8 @@
   </table></div>
   {% endfor %}
 
-  <form method="post" action="/admin/tick" class="actions">
+  <form method="post" action="/admin/tick" class="actions"
+        hx-confirm="Run the daily job now? It marks overdue duties missed (with their strikes) and assigns today's duties. It changes nothing that's already done.">
     <button class="secondary">Run daily job now</button>
     <span class="muted">Runs by itself every day at {{ "%02d"|format(deadline_hour) }}:05.</span>
   </form>
