@@ -759,6 +759,8 @@ async def admin(request: Request, session: Session, user: AdminUser):
         user,
         users=all_users,
         trips=list(trips),
+        # Duties that ended before this are folded away under "earlier days".
+        fold_before=settings.today() - timedelta(days=7),
         strikes=list(all_strikes),
         aways=list(aways),
         dishwasher_clears=await dishwasher.clears_in_month(session, settings.today()),

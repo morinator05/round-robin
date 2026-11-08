@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Floor speaker – {{ super() }}{% endblock %}
+{# The message after an action shows in the sticky jump bar, under its links, so it never
+   covers them and the counts stay in view. #}
+{% block messages %}{% endblock %}
 {% block content %}
 {# The most frequent tasks first (duties, strikes), the residents' accounts last. Each
    section scrolls back into view after one of its forms was sent (hx-swap "show"), so the
@@ -61,6 +64,7 @@
   <a href="#absences">Absences <span class="muted">{{ aways|length }}</span></a>
   <a href="#dishwasher">Dishwasher <span class="muted">{{ dishwasher_clears|length }}</span></a>
   <a href="#residents">Residents <span class="muted">{{ users|selectattr("active")|list|length }}<span class="wide-only"> active</span></span></a>
+  {% for kind, msg in messages %}<div class="flash {{ kind }}" role="status">{{ msg }}</div>{% endfor %}
 </div>
 
 <section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
@@ -84,19 +88,23 @@
   {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given", keep=true) }}{% endif %}
   {% if open_now %}{{ attention_list("Still open – in time, nothing to do yet", open_now, none) }}{% endif %}
   {% if near %}
-    <p class="near">One strike or less before a penalty week:
-      {% for u, n in near %}{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    {# One strike or less before a penalty week. #}
+    <h3>Close to a penalty week</h3>
+    <ul class="near">
+      {% for u, n in near %}<li>{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }} strikes</a></li>{% endfor %}
+    </ul>
   {% endif %}
 </section>
 
 <section class="card" id="duties" hx-swap="innerHTML show:#duties:top">
   <h2>Duties <span class="muted">last 14 days</span></h2>
-  {% for duty in Duty %}
-  <h3>{{ duty.label }}</h3>
+  {# One table per duty: the last 7 days in view, the week before folded away under a count
+     (the same columns, so both line up). #}
+  {% macro trip_table(list) %}
   <div class="table-wrap"><table class="trips">
     <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
     <thead><tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
-    {% for trip in trips if trip.duty == duty %}
+    {% for trip in list %}
       <tbody class="trip">
       {% for pd in trip.potential_drivers %}
         <tr>
@@ -104,7 +112,7 @@
           <td rowspan="{{ loop.length }}">{{ when(trip) }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
             {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
           {% endif %}
-          <td>{{ person(pd.user) }}</td>
+          <td>{{ person(pd.user) }}{% if pd.status == Status.missed and pd.kept_missed_at %} <span class="muted">kept missed</span>{% endif %}</td>
           <td>{% include "partials/status.html" %}</td>
           <td class="end">{{ duty_actions(pd, trip) }}</td>
         </tr>
@@ -114,6 +122,18 @@
       <tbody><tr><td class="muted" colspan="4">No duties in this period.</td></tr></tbody>
     {% endfor %}
   </table></div>
+  {% endmacro %}
+  {% for duty in Duty %}
+  {% set mine = trips|selectattr("duty", "equalto", duty)|list %}
+  {% set earlier = mine|selectattr("end_date", "<=", fold_before)|list %}
+  <h3>{{ duty.label }}</h3>
+  {{ trip_table(mine|reject("in", earlier)|list) }}
+  {% if earlier %}
+    <details class="older">
+      <summary>{{ earlier|length }} earlier {{ ("day" if duty == Duty.kitchen else "week") ~ ("" if earlier|length == 1 else "s") }}</summary>
+      {{ trip_table(earlier) }}
+    </details>
+  {% endif %}
   {% endfor %}
 
   <form method="post" action="/admin/tick" class="actions"
@@ -134,17 +154,17 @@
         {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
         {% else %}
           <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline"
-                hx-confirm="Revoke {{ name(s.user) }}'s strike from {{ s.created_at|date_time }}?">
+                hx-confirm="Revoke {{ name(s.user) }}'s strike from {{ s.created_at|date_time }}?{% if s.redeemed_by_trip_id %} If its penalty week hasn't been served yet, that week is cancelled and the other strikes count again.{% endif %}">
             <button class="secondary">Revoke</button>
           </form>
         {% endif %}
       </td>
     </tr>
-  {% else %}<tr><td class="muted" colspan="5">No active strikes.</td></tr>{% endfor %}
+  {% endfor %}
 {% endmacro %}
 <section class="card" id="strikes" hx-swap="innerHTML show:#strikes:top">
   <h2>Strikes <span class="muted">{{ active_strikes|length }} active</span></h2>
-  <form method="post" action="/admin/strikes" class="row"
+  <form method="post" action="/admin/strikes" class="row fill"
         hx-on:htmx:confirm="event.preventDefault();
           const who = this.user_id.selectedOptions[0]?.text || 'this resident';
           if (confirm(`Give ${who} a strike: “${this.reason.value}”? With {{ strike_threshold }} active strikes a penalty week follows right away.`)) event.detail.issueRequest();">
@@ -160,7 +180,10 @@
   {# Fixed columns, so the active and the older strikes line up under each other. #}
   {% set head %}<colgroup><col class="col-date"><col class="col-who"><col><col class="col-by"><col class="col-action"></colgroup>
     <tr><th>Date</th><th>Resident</th><th>Reason</th><th>By</th><th class="end">Status</th></tr>{% endset %}
-  <div class="table-wrap"><table class="strike-list">{{ head }}{{ strike_rows(active_strikes) }}</table></div>
+  {# An empty list is a plain sentence, like "Nothing needs attention.", not a bare header. #}
+  {% if active_strikes %}
+    <div class="table-wrap"><table class="strike-list">{{ head }}{{ strike_rows(active_strikes) }}</table></div>
+  {% else %}<p class="muted">No active strikes.</p>{% endif %}
   {% if old_strikes %}
     <details class="older">
       <summary>{{ old_strikes|length }} revoked or used</summary>
@@ -183,6 +206,7 @@
     <label>To <input type="date" name="end_date" required></label>
     <button>Add</button>
   </form>
+  {% if aways %}
   <div class="table-wrap"><table class="compact">
     <tr><th>Resident</th><th>Dates</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for a in aways %}
@@ -196,12 +220,14 @@
           </form>
         </td>
       </tr>
-    {% else %}<tr><td class="muted" colspan="3">Nobody is away.</td></tr>{% endfor %}
+    {% endfor %}
   </table></div>
+  {% else %}<p class="muted">Nobody is away.</p>{% endif %}
 </section>
 
 <section class="card" id="dishwasher" hx-swap="innerHTML show:#dishwasher:top">
   <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
+  {% if dishwasher_clears %}
   <div class="table-wrap"><table class="compact">
     <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for c in dishwasher_clears %}
@@ -216,8 +242,9 @@
           </form>
         </td>
       </tr>
-    {% else %}<tr><td class="muted" colspan="3">Nobody has emptied it this month yet.</td></tr>{% endfor %}
+    {% endfor %}
   </table></div>
+  {% else %}<p class="muted">Nobody has emptied it this month yet.</p>{% endif %}
 </section>
 
 <section class="card" id="residents" hx-swap="innerHTML show:#residents:top">
@@ -240,7 +267,7 @@
   {% for u in users %}
     <details class="resident{% if not u.active %} inactive{% endif %}">
       <summary>
-        {{ person(u) }} <span class="muted">{{ u.name }} · @{{ u.username }}</span>
+        {{ person(u) }} <span class="muted">{{ u.name }}<span class="sep">·</span>@{{ u.username }}</span>
         {% if u.is_admin %}<span class="tag tag-admin">floor speaker</span>{% endif %}
         {% if not u.active %}<span class="tag">inactive</span>{% endif %}
       </summary>
@@ -248,7 +275,7 @@
         <form method="post" action="/admin/users/{{ u.id }}/edit" class="row">
           <label>Name <input name="name" value="{{ u.name }}"></label>
           <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
-          <label>New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
+          <label class="wide">New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
           <label class="check"><span><input type="checkbox" name="is_admin" value="true" {% if u.is_admin %}checked{% endif %}
                  {% if u.id == user.id %}disabled{% endif %}> Floor speaker</span></label>
           <button>Save</button>

@@ -1841,8 +1841,9 @@ async def test_admin_sees_what_needs_attention(session, client, midday):
     assert "No strike, no credit" in still_open
     # The daily job says what it does before it runs.
     assert 'hx-confirm="Run the daily job now? It marks overdue duties missed' in page
-    near = block.split("before a penalty week:")[1]
-    assert f"{people[3].room_number}</span>" in near and 'href="#strikes">2 of 3' in near
+    # Its own small list, one resident per entry, instead of a run-on sentence.
+    near = block.split("<h3>Close to a penalty week</h3>")[1]
+    assert f"{people[3].room_number}</span>" in near and 'href="#strikes">2 of 3 strikes' in near
     assert "Nothing needs attention." not in block
     jump = page.split('class="jump"')[1].split("</div>")[0]
     assert 'href="#attention"' in jump
@@ -1862,13 +1863,21 @@ async def test_used_strike_says_penalty_week_next_to_its_reason(session, client)
     await session.commit()
     await login(client, "p1")
     page = (await client.get("/admin")).text
-    used = page.split('<details class="older">')[1].split("</details>")[0]
+    section = html.unescape(page.split('id="strikes"')[1].split("</section>")[0])
+    used = section.split('<details class="older">')[1].split("</details>")[0]
     row = used.split("<td>r0")[1].split("</tr>")[0]
     reason, status = row.split('<td class="end">')
     # The label sits with the reason, so the status column only ever holds one button or
     # tag and both strike tables keep the same columns.
     assert '<span class="tag">penalty week</span>' in reason
-    assert "penalty week" not in status and "Revoke" in status
+    assert 'class="tag">penalty week' not in status and "Revoke" in status
+    # Revoking a used strike says what happens to its penalty week; an active one doesn't.
+    assert "that week is cancelled and the other strikes count again" in status
+    await strikes.issue(session, user_id=people[3].id, reason="solo", today=settings.today())
+    await session.commit()
+    page = html.unescape((await client.get("/admin")).text)
+    active = page.split("<td>solo")[1].split("</tr>")[0]
+    assert "Revoke" in active and "cancelled" not in active
 
 
 async def test_keep_missed_takes_it_off_needs_attention(session, client, midday):
@@ -1895,9 +1904,15 @@ async def test_keep_missed_takes_it_off_needs_attention(session, client, midday)
     block = page.split('id="attention"')[1].split("</section>")[0]
     assert f"/admin/potential-drivers/{late.id}/" not in block
     assert f"/admin/potential-drivers/{other.id}/keep-missed" in block
-    # Still in the duties table, where it can be marked done or excused after all.
+    # Still in the duties table, where it can be marked done or excused after all, and
+    # marked as decided there.
     duties_block = page.split('id="duties"')[1].split("</section>")[0]
     assert f"/admin/potential-drivers/{late.id}/excuse" in duties_block
+    late_row = duties_block.split(f"/admin/potential-drivers/{late.id}/excuse")[0]
+    late_row = late_row.rsplit("<tr>", 1)[1]
+    assert '<span class="muted">kept missed</span>' in late_row
+    other_row = duties_block.split(f"/admin/potential-drivers/{other.id}/excuse")[0]
+    assert "kept missed" not in other_row.rsplit("<tr>", 1)[1]
     after = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
     assert int(after.group(1)) == int(count.group(1)) - 1
     # Nothing else changes: still missed, the strike stays.
@@ -1909,6 +1924,36 @@ async def test_keep_missed_takes_it_off_needs_attention(session, client, midday)
         .where(Strike.user_id == late_user.id, Strike.revoked_at.is_(None))
     )
     assert active == 1
+
+
+async def test_admin_folds_duties_older_than_a_week(session, client, midday):
+    people = await make_users(session, n=4)
+    old_day = settings.today() - timedelta(days=10)
+    await kitchen_pair(session, people, old_day)
+    _, today_pd, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    kitchen = page.split('id="duties"')[1].split("<h3>Trash duty</h3>")[0]
+    recent, earlier = kitchen.split('<details class="older">')
+    # The last 7 days in view, older ones folded (with all their buttons) under a count.
+    assert f"/admin/potential-drivers/{today_pd.id}/excuse" in recent
+    assert f"{old_day:%a} {short_date(old_day)}" in earlier
+    assert f"{old_day:%a} {short_date(old_day)}" not in recent
+    assert "<summary>1 earlier day</summary>" in earlier and "/excuse" in earlier
+
+
+async def test_empty_admin_lists_are_a_plain_sentence(session, client):
+    await make_users(session, n=3)
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    for section, sentence in [
+        ("absences", "Nobody is away."),
+        ("dishwasher", "Nobody has emptied it this month yet."),
+        ("strikes", "No active strikes."),
+    ]:
+        block = page.split(f'id="{section}"')[1].split("</section>")[0]
+        # Like "Nothing needs attention.": no table with only a header above it.
+        assert f'<p class="muted">{sentence}</p>' in block and "<table" not in block
 
 
 async def test_keep_missed_only_for_the_floor_speaker_and_missed_duties(session):

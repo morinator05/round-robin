@@ -285,14 +285,14 @@ td.end form.inline + form.inline { margin-left: .4rem; }
 /* Admin duties: one table per duty with the same columns, so both line up. A trip's
    residents sit close together with no line between them, one hairline between trips, and
    the whole trip lit up on hover. */
-table.trips { table-layout: fixed; min-width: 46rem; }
+table.trips { table-layout: fixed; min-width: 54rem; }
 table.trips .col-date { width: 11rem; }
 table.trips .col-status { width: 8.5rem; }
-table.trips .col-action { width: 16rem; }
-/* "Needs attention": room for Done, Excuse and Keep missed. The buttons start at the left,
-   so Done and Excuse stand in the same place in both lists. */
-table.attention .col-action { width: 24rem; }
-table.attention td.end { text-align: left; }
+/* Room for Done, Excuse and Keep missed, in "Needs attention" and the duties alike, so the
+   columns of the stacked cards line up; the buttons start at the left, so each one stands
+   in the same place everywhere. */
+table.trips .col-action { width: 24rem; }
+table.trips td.end { text-align: left; }
 table.trips tbody.trip td { border-bottom: 0; }
 table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
 table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
@@ -324,6 +324,10 @@ table.strike-list .col-date { width: 10rem; }
 table.strike-list .col-who { width: 9rem; }
 table.strike-list .col-by { width: 6.5rem; }
 table.strike-list .col-action { width: 8.5rem; }
+/* Revoked and used strikes: Revoke as a quiet text button, so the active list stays the
+   one that stands out. */
+tr.muted td.end button { background: none; border-color: transparent; box-shadow: none; }
+tr.muted td.end button:hover { background: var(--nav-hover); }
 /* Inside a card the table is part of the card: no second shadow, only the card's corners. */
 .card .table-wrap { box-shadow: none; border-radius: 2px; }
 .card form.row + .table-wrap { margin-top: 1rem; }
@@ -338,7 +342,14 @@ table.strike-list .col-action { width: 8.5rem; }
 .flash { position: sticky; top: .5rem; z-index: 5; box-shadow: var(--shadow); }
 .flash.ok { animation: flash-out .4s ease-in 5s forwards; }
 @keyframes flash-out { to { opacity: 0; visibility: hidden; } }
-@media (prefers-reduced-motion: reduce) { .flash.ok { animation-duration: 0s; animation-delay: 8s; } }
+/* Admin: the message sits in the sticky jump bar, under the links, across its width; a
+   success message folds away again after a few seconds. */
+.jump .flash { flex-basis: 100%; position: static; margin: 0; box-shadow: none; }
+.jump .flash.ok { animation: flash-fold .4s ease-in 5s forwards; }
+@keyframes flash-fold { to { opacity: 0; visibility: hidden; max-height: 0; margin-top: -.4rem;
+                             padding-block: 0; border-width: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .flash.ok, .jump .flash.ok { animation-duration: 0s; animation-delay: 8s; } }
 
 /* --- "?" after a heading: a small square link to that topic on the help page. */
 .help-link { display: inline-grid; place-content: center; width: 1.4em; height: 1.4em;
@@ -358,18 +369,25 @@ main > p { max-width: 68ch; }
 
 /* --- Admin: a bar of links to the sections, with what's waiting in each. */
 .jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.5rem 0 1.25rem;
-         /* Stays at the top of the long page; the message (z-index 5) goes over it. */
+         /* Stays at the top of the long page, with the message after an action in it. */
          position: sticky; top: 0; z-index: 4; padding: .5rem 0; background: var(--bg); }
-/* "Needs attention": the residents close to a penalty week, under the open duties. */
-#attention .near { margin: .75rem 0 0; }
+/* "Needs attention": the residents close to a penalty week, one entry each, side by side. */
+ul.near { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap;
+          gap: .3rem 1.75rem; }
+ul.near li { white-space: nowrap; }
+ul.near a { margin-left: .35rem; }
+/* "Full name · @username" after a resident's name: the dot with even room on both sides
+   (Overpass draws it right of centre, so the right margin is larger). */
+.sep { margin: 0 .55em 0 .3em; }
 /* On a phone: small chips in two rows, so all six links show and the sticky bar stays
    low; the counts as bare numbers. */
 @media (max-width: 600px) {
   .jump { gap: .3rem; padding: .4rem 0; }
   .jump a { padding: .25rem .5rem .15rem; font-size: .8rem; }
 }
-/* Sections scrolled into view (jump bar, after an action) stop below the sticky message. */
-main > section[id] { scroll-margin-top: 5.5rem; }
+/* Sections scrolled into view (jump bar, after an action) stop below the sticky bar and
+   the message in it. */
+main > section[id] { scroll-margin-top: 8rem; }
 /* Deleting a resident stays well away from Deactivate: at the far right. */
 .panel .actions form:has(.danger) { margin-left: auto; }
 /* The links grow to fill each row of the bar, so it is as wide as the cards below it. */
@@ -392,10 +410,15 @@ details.resident > summary { padding: .6rem 0 .5rem; }
 details.resident.inactive .person-name { color: var(--muted); font-weight: 400; }
 .panel { display: grid; gap: .75rem; margin: 0 0 1rem; padding: 1rem;
          background: var(--card-alt); }
-/* The text fields share the whole width of the card; the room number only needs a short one. */
-.panel form.row label:not(.check) { flex: 2 1 9rem; }
-.panel form.row label.short { flex: 1 1 5rem; }
+/* "Add resident" and each resident's form on the same columns, so the stacked panels line
+   up: name, a short room number, two password-ish fields ("New password" takes both), the
+   checkbox and an equally wide button. */
+.panel form.row { display: grid; align-items: end;
+                  grid-template-columns: 2fr 1fr 2fr 2fr max-content 5rem; }
+.panel form.row > * { min-width: 0; }
+.panel form.row label.wide { grid-column: span 2; }
 .panel form.row label:not(.check) input { width: 100%; }
+.panel form.row > button { width: 100%; }
 
 /* --- Phones. */
 @media (max-width: 600px) {
@@ -451,7 +474,12 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 0; }
   /* Duties: the date heads the trip; per resident the name and status, buttons below. */
   table.trips td[rowspan] { grid-column: 1 / -1; padding: 0; font-weight: 600; }
-  table.trips td.end { grid-column: 1 / -1; }
+  table.trips td.end { grid-column: 1 / -1; text-align: right; }
+  /* Stacked rows light up as a whole (a tap leaves them "hovered"), not cell by cell. */
+  table.trips tbody.trip:hover td, table.strike-list tr:hover > td,
+  table.history tr:hover > td { background: none; }
+  table.trips tbody.trip:hover tr, table.strike-list tr:hover,
+  table.history tr:hover { background: var(--card-alt); }
   /* Stacked lines have no common height to keep. */
   table.trips td.end::after { content: none; }
   /* "Needs attention": the buttons fill the width, Keep missed on a line of its own. */
@@ -461,8 +489,17 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   /* Strikes: date, resident, reason and who gave it stacked; status or Revoke on the right. */
   table.strike-list td.end { grid-column: 2; grid-row: 1 / span 4; }
   table.strike-list td:not(.end) { grid-column: 1; }
-  /* Away forms: one field under the other, "Add" across the whole card below them. */
-  .away-form label, .away-form button { flex-basis: 100%; }
+  /* Resident panels: name and room side by side, the rest one under the other and the
+     button across the width, like the away forms. */
+  .panel form.row { grid-template-columns: 2fr 1fr; }
+  .panel form.row > :nth-child(n+3) { grid-column: 1 / -1; }
+  /* The jump bar has two rows here, plus the message. */
+  main > section[id] { scroll-margin-top: 10rem; }
+  /* Away forms and "Give strike": one field under the other, the button across the whole
+     card below them. */
+  .away-form label, .away-form button, form.row.fill > label, form.row.fill > button {
+    flex-basis: 100%; }
+  form.row.fill select { width: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */
   .card.help .table-wrap table { min-width: 0; }
 }
