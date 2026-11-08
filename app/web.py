@@ -330,18 +330,26 @@ async def you_ctx(
             pd.user_id == user.id and pd.status is status for pd in trip.potential_drivers
         )
 
-    kitchen_next = _next_in(kitchen_preview.plans[chosen], user.id)
-    # Who comes up next depends on who cleans the open trip: name the other outcomes for
-    # you if they'd move your next kitchen day.
-    alternatives = []
+    # Your next kitchen day for each possible outcome of the open trip (who cleans it),
+    # earliest first; outcomes giving the same day are one. With a single outcome it also
+    # names who you'll be on it with.
+    outcomes: list[dict] = []
     for uid, plan in kitchen_preview.plans.items():
-        other = _next_in(plan, user.id)
-        if uid not in (None, chosen) and (other and other.start) != (
-            kitchen_next and kitchen_next.start
-        ):
-            alternatives.append(
-                {"entry": other, "cleaner": people.get(uid), "is_me": uid == user.id}
-            )
+        entry = _next_in(plan, user.id)
+        start = entry.start if entry else None
+        if any(o["start"] == start for o in outcomes):
+            continue
+        partners = [people[p] for p in (entry.potential_drivers if entry else []) if p != user.id]
+        outcomes.append(
+            {
+                "entry": entry,
+                "start": start,
+                "cleaner": people.get(uid) if uid is not None else None,
+                "is_me": uid == user.id,
+                "partners": [p for p in partners if p is not None],
+            }
+        )
+    outcomes.sort(key=lambda o: o["start"] or date.max)
     history = await session.scalar(
         select(func.count(PotentialDriver.id)).where(PotentialDriver.user_id == user.id)
     )
@@ -356,8 +364,7 @@ async def you_ctx(
         "trash_deadline": duties.deadline(trash) if trash else None,
         "trash_now": has(trash, Status.pending),
         "trash_done": has(trash, Status.drove),
-        "kitchen_next": kitchen_next,
-        "kitchen_alternatives": alternatives,
+        "kitchen_outcomes": outcomes,
         "trash_next": _next_in(trash_plan, user.id),
         "strikes": len(await strikes.active_strikes(session, user.id)),
         "is_new": not history,

@@ -24,10 +24,19 @@
   {%- endif -%}
   </strong>
   {% if not y.inactive %}
-    <span class="part">Next kitchen: {% if y.kitchen_next %}{{ dayname(y.kitchen_next) }}{% else %}not in the next {{ preview_days }} days{% endif %}
-    {%- for a in y.kitchen_alternatives %}
-      ({% if a.entry %}{{ dayname(a.entry) }}{% else %}later{% endif %} if {% if a.is_me %}you clean{% else %}{{ person(a.cleaner) }} cleans{% endif %})
-    {%- endfor %}</span>
+    {# One outcome: the day and with whom. Several (who cleans the open duty decides):
+       the earliest first, each with what it depends on, the last one after "otherwise". #}
+    {% set oc = y.kitchen_outcomes %}
+    {% macro kday(o) %}{% if o.entry %}{{ dayname(o.entry) }}{% else %}not in the next {{ preview_days }} days{% endif %}{% endmacro %}
+    <span class="part">Next kitchen:
+    {%- if oc|length == 1 %} {{ kday(oc[0]) }}
+      {%- if oc[0].partners %} with {% for p in oc[0].partners %}{{ person(p) }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    {%- else %}
+      {%- for o in oc %}
+        {%- if loop.last %} otherwise {{ kday(o) }}
+        {%- else %} {{ kday(o) }} if {% if o.is_me %}you clean{% else %}{{ person(o.cleaner) }} cleans{% endif %},{% endif %}
+      {%- endfor %}
+    {%- endif %}</span>
     <span class="part">Next trash: {% if y.trash_next %}<span class="nowrap">{% if y.trash_next.start == today %}this week, from today {{ starts }}{% else %}{{ y.trash_next.start|short_date }}–{{ y.trash_next.end|short_date }}{% endif %}</span>{% else %}not in the next {{ preview_days }} days{% endif %}</span>
   {%- endif %}
   {% if y.strikes %}<span class="part"><a href="/me">{{ y.strikes }} of {{ strike_threshold }} strikes</a> – at {{ strike_threshold }}: an extra trash week</span>{% endif %}

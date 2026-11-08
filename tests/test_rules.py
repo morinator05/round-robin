@@ -1422,6 +1422,31 @@ async def test_dashboard_at_night_talks_about_yesterday_and_today(session, clien
     line = you_line((await client.get("/")).text)
     words = re.sub(r"<[^>]+>", "", line)
     assert f"Next kitchen: today from {settings.deadline_hour:02d}:05" in words
+    # The earliest outcome first, and what it depends on; the other one after "otherwise".
+    other = next(
+        (e for e in list(preview.plans.values())[1] if up_today.id in e.potential_drivers), None
+    )
+    if other and other.start != tuesday:
+        assert " cleans, otherwise " in words
+    # The card says when today's duty comes.
+    page = html.unescape(text(await client.get("/")))
+    assert f"Today's kitchen duty is assigned at {settings.deadline_hour:02d}:05" in page
+
+
+async def test_next_kitchen_says_with_whom(session, client, midday):
+    people = await make_users(session, n=6)
+    _, first, _, p1, _ = await kitchen_pair(session, people, settings.today())
+    await duties.mark_as_driver(session, first, p1, settings.now())
+    await session.commit()
+    today = settings.today()
+    preview = await duties.preview(
+        session, Duty.kitchen, today + timedelta(days=1), today + timedelta(days=14), today
+    )
+    entry = preview.plans[None][0]
+    me, partner = (next(p for p in people if p.id == uid) for uid in entry.potential_drivers)
+    await login(client, me.username)
+    words = re.sub(r"<[^>]+>", "", you_line((await client.get("/")).text))
+    assert f"with Person {partner.room_number}" in words
 
 
 async def test_undo_on_the_card(session, client, monkeypatch):

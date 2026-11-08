@@ -9,6 +9,12 @@
       {% if duty == Duty.kitchen %}{{ day or (trip.start_date|weekday ~ " " ~ trip.start_date|short_date) }}{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
     </span>
   </h2>
+  {# Before the deadline hour this is still yesterday's (last week's) duty: say when the
+     next one comes, so nobody wonders who is on today. #}
+  {% if trip and trip.end_date < today %}
+    <p class="muted assigned">{{ "Today's kitchen" if duty == Duty.kitchen else "This week's trash" }}
+      duty is assigned at {{ "%02d"|format(deadline_hour) }}:05.</p>
+  {% endif %}
   {% if trip and trip.is_penalty %}<p class="penalty">Penalty trash duty ({{ strike_threshold }} strikes)</p>{% endif %}
   {% if not trip or not trip.potential_drivers %}
     <p class="muted">Nobody assigned.</p>

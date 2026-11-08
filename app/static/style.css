@@ -113,6 +113,8 @@ h1.date { font-variant-numeric: tabular-nums; }
 .you .nowrap { white-space: nowrap; }
 /* "Undo" in a card's last line: a small text button, not another big box. */
 .duty .foot button.link { padding: 0 .2rem; font-size: inherit; color: var(--accent); }
+/* Before the deadline hour: when the next duty is assigned, under the card title. */
+.duty .assigned { margin: -.4rem 0 .6rem; font-size: .9rem; }
 /* My profile: the two dates share the card's width, "Add" stays as wide as its text. */
 .away-form label { flex: 1 1 9rem; }
 .away-form input { width: 100%; }
