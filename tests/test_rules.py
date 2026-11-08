@@ -2054,6 +2054,27 @@ async def test_preview_leaves_out_dishwasher_heroes(session):
     assert heroes & planned(in_october)
 
 
+async def test_dishwasher_undo_is_for_whoever_marked_it_for_a_short_while(session):
+    people = await make_users(session, n=3)
+    marked = at(MONDAY, 12)
+    clear = await dishwasher.mark_cleared(session, people[1], marked)
+    soon = marked + timedelta(minutes=dishwasher.UNDO_MINUTES - 1)
+    late = marked + timedelta(minutes=dishwasher.UNDO_MINUTES + 1)
+    assert dishwasher.can_undo_clear(clear, people[1], soon)
+    assert not dishwasher.can_undo_clear(clear, people[2], soon)
+    assert not dishwasher.can_undo_clear(clear, people[1], late)
+    with pytest.raises(DishwasherError):
+        await dishwasher.undo_clear(session, clear, people[2], soon)
+    await dishwasher.undo_clear(session, clear, people[1], soon)
+    # Gone, so the next emptying can be marked right away (by anyone).
+    await dishwasher.mark_cleared(session, people[2], soon)
+
+    # Not into a new month: the old one may already have decided the heroes.
+    end = at(date(2026, 11, 30), 23) + timedelta(minutes=58)
+    last = await dishwasher.mark_cleared(session, people[1], end)
+    assert not dishwasher.can_undo_clear(last, people[1], end + timedelta(minutes=5))
+
+
 async def test_admin_deletes_only_this_months_dishwasher_entries(session):
     people = await make_users(session, n=3)
     admin = people[0]
@@ -2092,9 +2113,15 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.status_code == 303 and r.headers["location"] == "/"
     page = text(await client.get("/"))
-    # While it can't be marked, the button stays but is disabled (no "done" tag to tap on).
-    assert "disabled>I emptied it</button>" in page and "Can be marked again from" in page
+    # While it can't be marked: a plain label saying when it can, no (disabled) button.
+    assert "Again from" in page and "disabled" not in page
     assert 'hx-post="/dishwasher?card=1"' not in page and 'badge s-drove">done' not in page
+    # A mis-tap can be taken back for a few minutes, by whoever marked it.
+    clear_id = await session.scalar(
+        select(DishwasherClear.id).where(DishwasherClear.user_id == people[1].id)
+    )
+    undo = f'hx-post="/dishwasher/{clear_id}/undo?card=1"'
+    assert undo in page
     assert "You emptied it once this month" in page and "Optional:" not in page
     assert "Last emptied by you today" in page
     # Too soon: the page reloads to show why.
@@ -2111,8 +2138,10 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     await client.post("/logout")
     await login(client, "p3")
     page = text(await client.get("/"))
-    assert "You have no kitchen duty in" in page and "disabled>I emptied it</button>" in page
-    assert 'badge s-rode">not needed' not in page
+    assert "You have no kitchen duty in" in page and "Again from" in page
+    assert 'badge s-rode">not needed' not in page and undo not in page
+    r = await client.post(f"/dishwasher/{clear_id}/undo?card=1", headers=card)
+    assert r.headers.get("hx-refresh") == "true"
     assert "You have no kitchen duty in" in text(await client.get("/me"))
 
     await users.set_active(session, people[3], False, settings.now())

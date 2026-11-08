@@ -60,6 +60,7 @@ rounded so that they still sum to 0.
 - Counted per calendar month. The 2 residents with the most emptyings become **dishwasher
   heroes**: no kitchen duty for the whole next month. That month counts like being away (for
   kitchen only), so they don't have to catch up afterwards. Trash duty stays as usual.
+- A mis-tap can be taken back for 10 minutes by whoever marked it.
 - Ties: whoever reached the count first wins.
 - The floor speaker can delete wrong entries of the current month; earlier months are final.
 

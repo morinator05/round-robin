@@ -10,18 +10,21 @@
       <button class="primary" hx-post="/dishwasher?card=1" hx-target="#card-dishwasher"
               hx-select="#card-dishwasher" hx-swap="outerHTML">I emptied it</button>
     {% elif d.state in ("done", "not_needed") %}
-      {# Just emptied (by you or someone else): the same button, but it can't be pressed
-         until the next one counts (said below). #}
-      <button class="primary" disabled>I emptied it</button>
+      {# Just emptied (by you or someone else): when it can be marked again, as a plain
+         label rather than a greyed-out button that looks almost like the real one. #}
+      <span class="badge">Again from {{ d.next_allowed|clock }}</span>
     {% else %}
       <span class="badge">inactive</span>
     {% endif %}
   </div>
   <p class="muted foot">
     {% if d.last %}Last emptied by {% if d.last.user_id == user.id %}you{% else %}{{ person(d.last.user) }}{% endif %}
-      {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}.
+      {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}
+      {%- if d.can_undo %} ·
+        <button class="link" hx-post="/dishwasher/{{ d.last.id }}/undo?card=1" hx-target="#card-dishwasher"
+                hx-select="#card-dishwasher" hx-swap="outerHTML">Undo</button>
+      {%- else %}.{% endif %}
     {%- else %}Nobody has emptied it yet.{% endif %}
-    {% if d.next_allowed and d.state != "inactive" %}Can be marked again from {{ d.next_allowed|clock }}.{% endif %}
     {% if d.mine %}You emptied it {{ "once" if d.mine == 1 else d.mine ~ " times" }} this month.
     {%- elif d.state != "inactive" %}Optional: the {{ dishwasher_heroes }} who empty it most get next month off kitchen duty.{% endif %}
   </p>

@@ -391,6 +391,7 @@ async def dishwasher_ctx(
         "month": today,
         "last": last,
         "next_allowed": allowed if waiting else None,
+        "can_undo": last is not None and dishwasher.can_undo_clear(last, user, now),
         "state": state,
         "mine": next((s.count for s in standings if s.user_id == user.id), 0),
         "heroes": heroes,
@@ -421,6 +422,26 @@ async def mark_dishwasher(request: Request, session: Session, user: CurrentUser)
         return redirect("/")
     if not card:
         flash(request, "Marked as emptied")
+    return redirect("/")
+
+
+@router.post("/dishwasher/{clear_id}/undo")
+async def undo_dishwasher(request: Request, session: Session, user: CurrentUser, clear_id: int):
+    """Take back your own mis-tapped emptying; from the dashboard card."""
+    card = is_card_request(request)
+    clear = await session.get(DishwasherClear, clear_id)
+    try:
+        if clear is None:
+            raise DishwasherError("That entry doesn't exist any more")
+        await dishwasher.undo_clear(session, clear, user, settings.now())
+        await session.commit()
+    except DishwasherError as e:
+        flash(request, str(e), "error")
+        if card:
+            return Response(headers={"HX-Refresh": "true"})
+        return redirect("/")
+    if not card:
+        flash(request, "Taken back")
     return redirect("/")
 
 
