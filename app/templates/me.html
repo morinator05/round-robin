@@ -12,7 +12,7 @@
   <tr><th>Date</th><th>Reason</th><th class="end">Status</th></tr>
   {% for s in strikes %}
     <tr>
-      <td>{{ s.created_at|local_date|short_date }}</td>
+      <td><span class="nowrap">{{ s.created_at|local_date|short_date }}</span></td>
       <td>{{ s.reason }}</td>
       <td class="end">{% if s.revoked_at %}<span class="badge s-excused">revoked</span>
           {% elif s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>
@@ -60,8 +60,9 @@
   <tr><th>Date</th><th>Duty</th><th class="end">Status</th></tr>
   {% for pd in history %}
     <tr>
-      <td>{{ pd.trip.start_date|weekday }} {{ pd.trip.start_date|short_date }}{% if pd.trip.end_date != pd.trip.start_date %}–{{ pd.trip.end_date|short_date }}{% endif %}</td>
-      <td>{{ pd.trip.duty.label }}{% if pd.trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
+      {# A week may wrap after the dash on a phone, never inside a date. #}
+      <td><span class="nowrap">{{ pd.trip.start_date|weekday }} {{ pd.trip.start_date|short_date }}</span>{% if pd.trip.end_date != pd.trip.start_date %}–<span class="nowrap">{{ pd.trip.end_date|short_date }}</span>{% endif %}</td>
+      <td>{{ pd.trip.duty.label|replace(" duty", "") }}{% if pd.trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
       <td class="end">{% include "partials/status.html" %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">No duties yet.</td></tr>{% endfor %}

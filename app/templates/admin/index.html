@@ -122,12 +122,11 @@
     <tr{% if s.revoked_at or s.redeemed_by_trip_id %} class="muted"{% endif %}>
       <td>{{ s.created_at|date_time }}</td>
       <td>{{ person(s.user) }}</td>
-      <td>{{ s.reason }}</td>
+      <td>{{ s.reason }}{% if s.redeemed_by_trip_id and not s.revoked_at %} <span class="tag">penalty week</span>{% endif %}</td>
       <td>{{ "automatic" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
       <td class="end">
         {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
         {% else %}
-          {% if s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>{% endif %}
           <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline"
                 hx-confirm="Revoke {{ name(s.user) }}'s strike from {{ s.created_at|date_time }}?">
             <button class="secondary">Revoke</button>
@@ -152,7 +151,9 @@
     <label class="grow">Reason <input name="reason" required></label>
     <button class="danger">Give strike</button>
   </form>
-  {% set head %}<tr><th>Date</th><th>Resident</th><th>Reason</th><th>By</th><th class="end">Status</th></tr>{% endset %}
+  {# Fixed columns, so the active and the older strikes line up under each other. #}
+  {% set head %}<colgroup><col class="col-date"><col class="col-who"><col><col class="col-by"><col class="col-action"></colgroup>
+    <tr><th>Date</th><th>Resident</th><th>Reason</th><th>By</th><th class="end">Status</th></tr>{% endset %}
   <div class="table-wrap"><table class="strike-list">{{ head }}{{ strike_rows(active_strikes) }}</table></div>
   {% if old_strikes %}
     <details class="older">
@@ -165,7 +166,7 @@
 <section class="card" id="absences" hx-swap="innerHTML show:#absences:top">
   <h2>Absences <span class="muted">current and upcoming</span></h2>
   {# For a resident who tells the floor speaker in person. #}
-  <form method="post" action="/admin/aways" class="row">
+  <form method="post" action="/admin/aways" class="row away-form">
     <label>Resident
       <select name="user_id" required>
         <option value="">Choose resident…</option>
@@ -199,7 +200,8 @@
     <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for c in dishwasher_clears %}
       <tr>
-        <td>{{ c.cleared_at|date_time }}</td>
+        {# Only this month's entries (the heading names it), so no year. #}
+        <td><span class="nowrap">{{ c.cleared_at|local_date|short_date }}</span> {{ c.cleared_at|clock }}</td>
         <td>{{ person(c.user) }}</td>
         <td class="end">
           <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"

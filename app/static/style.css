@@ -104,20 +104,23 @@ nav form { margin: 0; }
 .card { background: var(--card); border: 1px solid var(--border);
         padding: 1.25rem; box-shadow: var(--shadow); }
 .card h2 { margin-top: 0; }
+/* A paragraph at the end of a card doesn't add its margin to the card's padding. */
+.card > :last-child { margin-bottom: 0; }
 .card h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
 /* Overview: what it means for you, right under the date. */
 .you { margin: -.25rem 0 1.25rem; display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; }
-.you .nowrap { white-space: nowrap; }
+/* Text that stays on one line, such as one date in a column that may wrap. */
+.nowrap { white-space: nowrap; }
 /* "Undo" in a card's last line: a small text button, not another big box. */
 .duty .foot button.link { padding: 0 .2rem; font-size: inherit; color: var(--accent); }
 /* Before the deadline hour: when the next duty is assigned, under the card title. */
 .duty .assigned { margin: -.4rem 0 .6rem; font-size: .9rem; }
-/* My profile: the two dates share the card's width, "Add" stays as wide as its text. */
+/* Away forms (profile, admin): the fields share the card's width, "Add" stays as wide as its text. */
 .away-form label { flex: 1 1 9rem; }
-.away-form input { width: 100%; }
+.away-form input, .away-form select { width: 100%; }
 /* The note under the away form; the profile's two cards; the password card, last and narrow. */
 .away-form + .note { margin: .6rem 0 0; font-size: .9rem; }
 .grid.profile { margin-top: 1.5rem; }
@@ -151,7 +154,8 @@ h1.date { font-variant-numeric: tabular-nums; }
 .plan-switch a[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent-line);
                                       color: var(--accent-strong); font-weight: 700; }
 /* The room inside a choice: just the number, in the link's own colour. */
-.plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none; }
+.plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none;
+                     vertical-align: baseline; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
@@ -289,9 +293,15 @@ table.trips tbody.trip td { border-bottom: 0; }
 table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
 table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
 table.trips tbody.trip > tr + tr > td { padding-top: .15rem; }
-/* The date, top-aligned and padded down to the first resident's line (which buttons make
-   taller); a penalty week says so on a second line. */
-table.trips td[rowspan] { vertical-align: top; white-space: normal; padding-top: .85rem; }
+/* All cells of a line share the text baseline, so the date (a rowspan cell aligns with its
+   first line) starts level with the first resident, also when a penalty week says so on a
+   second line. An invisible strut as high as a button gives every line the same height,
+   with buttons or without. */
+table.trips td { vertical-align: baseline; }
+table.trips td[rowspan] { white-space: normal; }
+table.trips td.end::after { content: "\200b"; display: inline-block; width: 0; font-size: .9rem;
+                            line-height: 1.5; padding: .4rem 0 .3rem;
+                            border: solid transparent; border-width: 1px 0; }
 table.trips .penalty { display: block; }
 table.trips tbody.trip:hover td { background: var(--card-alt); }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
@@ -299,6 +309,17 @@ table.trips tbody.trip:hover td { background: var(--card-alt); }
 table.history { table-layout: fixed; min-width: 56rem; }
 table.history .col-date { width: 12rem; }
 table.history .col-action { width: 9rem; }
+/* A penalty week says so under the dates, which already fill the column. */
+table.history .penalty { display: block; }
+/* "nobody" and "–" as large as the names in the same column. */
+table.history span.muted { font-size: inherit; }
+/* Admin strikes: fixed columns, so the active and the older strikes line up. The reason
+   takes the rest and wraps if needed. */
+table.strike-list { table-layout: fixed; min-width: 46rem; }
+table.strike-list .col-date { width: 10rem; }
+table.strike-list .col-who { width: 9rem; }
+table.strike-list .col-by { width: 6.5rem; }
+table.strike-list .col-action { width: 8.5rem; }
 /* Inside a card the table is part of the card: no second shadow, only the card's corners. */
 .card .table-wrap { box-shadow: none; border-radius: 2px; }
 .card form.row + .table-wrap { margin-top: 1rem; }
@@ -347,7 +368,9 @@ main > p { max-width: 68ch; }
 main > section[id] { scroll-margin-top: 5.5rem; }
 /* Deleting a resident stays well away from Deactivate: at the far right. */
 .panel .actions form:has(.danger) { margin-left: auto; }
-.jump a { padding: .35rem .7rem .25rem; text-decoration: none; font-weight: 600;
+/* The links grow to fill each row of the bar, so it is as wide as the cards below it. */
+.jump a { flex: 1 1 auto; text-align: center; white-space: nowrap;
+          padding: .35rem .7rem .25rem; text-decoration: none; font-weight: 600;
           color: var(--accent-strong); background: var(--card); border: 1px solid var(--border); }
 .jump a:hover { border-color: var(--accent); }
 .jump .muted { font-weight: 400; margin-left: .2rem; }
@@ -394,7 +417,12 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   table.stats th, table.stats td { padding-left: .5rem; padding-right: .5rem; }
   /* The header row is hidden, so the last line says what it is. */
   table.history td:nth-child(3)::before { content: "Done by "; color: var(--muted); }
+  table.history .penalty { display: inline; }
   .phone-only { display: block; }
+  /* The first column only as wide as it needs: 12rem would squeeze the others. */
+  th:first-child { width: auto; }
+  /* The plan choices stacked, each across the whole width. */
+  .plan-switch a { flex: 1 1 auto; text-align: center; }
   .card .table-wrap table { min-width: 36rem; }
   /* Small tables (a date, a name or two, a tag or button) fit the screen instead: the
      date may take two lines and the cells are a bit narrower. */
@@ -405,7 +433,12 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
      table, so every button can be reached without scrolling sideways. */
   .card .table-wrap table.trips, .card .table-wrap table.strike-list { min-width: 0; }
   table.trips, table.trips tbody, table.strike-list, table.strike-list tbody { display: block; }
-  table.trips thead, table.trips colgroup, table.strike-list tr:first-child:has(th) { display: none; }
+  table.trips thead, table.trips colgroup, table.strike-list colgroup,
+  table.strike-list tr:first-child:has(th) { display: none; }
+  /* A resident without buttons ("not needed") gets no empty line under the name. */
+  table.trips td.end:empty { display: none; }
+  /* A trip's residents close together, the trips apart. */
+  table.trips tbody.trip > tr + tr { padding-top: .1rem; }
   table.trips tr, table.strike-list tr { display: grid; grid-template-columns: 1fr auto;
                                      align-items: center; gap: .35rem .6rem; padding: .55rem .7rem; }
   table.trips td, table.strike-list td { display: block; padding: 0; border: 0; white-space: normal; }
@@ -418,8 +451,8 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   /* Strikes: date, resident, reason and who gave it stacked; status or Revoke on the right. */
   table.strike-list td.end { grid-column: 2; grid-row: 1 / span 4; }
   table.strike-list td:not(.end) { grid-column: 1; }
-  /* My profile: "Add" across the whole card, below the dates. */
-  .away-form button { flex-basis: 100%; }
+  /* Away forms: one field under the other, "Add" across the whole card below them. */
+  .away-form label, .away-form button { flex-basis: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */
   .card.help .table-wrap table { min-width: 0; }
 }

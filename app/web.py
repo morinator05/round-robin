@@ -94,8 +94,13 @@ templates.env.globals["css_version"] = int(
 )
 templates.env.filters["short_date"] = short_date
 templates.env.filters["long_date"] = long_date
+# The date with no-break spaces, so in a narrow column only the time goes to a new line.
 templates.env.filters["date_time"] = lambda d: (
-    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}" if d else ""
+    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}".replace(
+        " ", "\u00a0", 2
+    )
+    if d
+    else ""
 )
 # Points with their sign: "+37", "−112" (a real minus sign), "0".
 templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"

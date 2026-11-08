@@ -1848,6 +1848,29 @@ async def test_admin_sees_what_needs_attention(session, client, midday):
     assert 'href="#attention"' in jump
 
 
+def test_date_time_only_wraps_before_the_time():
+    # In a narrow table column the date stays on one line and the time goes to the next,
+    # never "5 Nov / 2026 / 21:30".
+    moment = datetime(2026, 11, 5, 21, 30, tzinfo=settings.tz)
+    assert web.templates.env.filters["date_time"](moment) == "5 Nov 2026 21:30"
+
+
+async def test_used_strike_says_penalty_week_next_to_its_reason(session, client):
+    people = await make_users(session, n=4)
+    for i in range(settings.strike_threshold):
+        await strikes.issue(session, user_id=people[2].id, reason=f"r{i}", today=settings.today())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    used = page.split('<details class="older">')[1].split("</details>")[0]
+    row = used.split("<td>r0")[1].split("</tr>")[0]
+    reason, status = row.split('<td class="end">')
+    # The label sits with the reason, so the status column only ever holds one button or
+    # tag and both strike tables keep the same columns.
+    assert '<span class="tag">penalty week</span>' in reason
+    assert "penalty week" not in status and "Revoke" in status
+
+
 async def test_give_strike_confirm_names_the_resident(session, client):
     await make_users(session, n=3)
     await login(client, "p1")
