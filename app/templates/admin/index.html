@@ -64,7 +64,7 @@
       {{ trip_head("Duty") }}
       {% for trip, pd in rows %}
         <tbody class="trip"><tr>
-          <td rowspan="1">{{ when(trip) }}, {{ trip.duty.short_label|lower }}</td>
+          <td class="trip-date">{{ when(trip) }}, {{ trip.duty.short_label|lower }}</td>
           <td>{{ person(pd.user) }}{% if note %} <span class="muted">{{ note }}</span>{% endif %}</td>
           <td>{% include "partials/status.html" %}</td>
           <td class="end">{{ duty_actions(pd, trip, keep) }}</td>
@@ -95,7 +95,7 @@
       {% for pd in trip.potential_drivers %}
         <tr>
           {% if loop.first %}
-          <td rowspan="{{ loop.length }}">{{ trip|trip_dates }}
+          <td class="trip-date" rowspan="{{ loop.length }}">{{ trip|trip_dates }}
             {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
           {% endif %}
           <td>{{ person(pd.user) }}{% if pd.status == Status.missed and pd.kept_missed_at %} <span class="muted">kept missed</span>{% endif %}</td>
