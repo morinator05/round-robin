@@ -82,8 +82,9 @@ week.
 - Room numbers like `E103`: building, floor, room 01–99.
 
 **Daily job** (8:05): marks missed duties and gives the strikes, then assigns
-today's kitchen and this week's trash duty. Residents who become unavailable (away, paused,
-deleted) are replaced on their open duties immediately.
+today's kitchen and this week's trash duty. Residents who are paused or move out are replaced
+on their open duties immediately; on yesterday's duty, still open until 8:00, they are only
+taken off it. Being away doesn't take you off a duty you already have (see above).
 
 ## Pages
 

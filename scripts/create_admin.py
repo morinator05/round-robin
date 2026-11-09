@@ -4,8 +4,9 @@ import asyncio
 import getpass
 import sys
 
+from app.config import settings
 from app.db import SessionLocal
-from app.services import users
+from app.services import duties, users
 
 
 async def main() -> None:
@@ -25,6 +26,8 @@ async def main() -> None:
             )
         except users.UserError as e:
             sys.exit(str(e))
+        # Like adding a resident on the admin page: on today's duties if people are missing.
+        await duties.fill_current(session, settings.now())
         await session.commit()
         print(f"Floor speaker {user.name} (@{user.username}) created.")
 

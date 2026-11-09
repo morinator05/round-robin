@@ -85,9 +85,13 @@ today's trips, and commits. A day's (on Monday the week's) trip is only material
 deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
 Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
 startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
-the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay idempotent. Absences, pausing and deleting users call
-`duties.reconcile`, which removes them as riders and pending potential drivers of
-current/upcoming trips and chooses replacements.
+the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay
+idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
+every trip still open (yesterday's too, until its deadline): whoever no longer rides stops
+being a rider of undriven trips; paused and deleted pending potential drivers are replaced,
+but on a trip whose days are over only removed (nobody new gets a past duty, and
+`fill_current` never tops one up). Away pending potential drivers keep their duty. Deleting
+an absence or resuming someone makes them a rider again (`duties.add_riders`).
 
 **Layers.**
 - `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).

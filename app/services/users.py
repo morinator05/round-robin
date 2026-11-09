@@ -173,8 +173,9 @@ async def set_active(session: AsyncSession, user: User, active: bool, now: datet
     if active:
         await strikes.check_threshold(session, user.id, now.date())
         await duties.fill_current(session, now)
+        await duties.add_riders(session, now.date())
     else:
-        await duties.reconcile(session, now.date())
+        await duties.reconcile(session, now)
 
 
 async def delete(session: AsyncSession, user: User, now: datetime) -> None:
@@ -199,7 +200,7 @@ async def delete(session: AsyncSession, user: User, now: datetime) -> None:
         await session.delete(trip)
     await session.delete(user)
     await session.flush()
-    await duties.reconcile(session, today)
+    await duties.reconcile(session, now)
     await duties.fill_current(session, now)
 
 
@@ -229,7 +230,7 @@ async def add_away(
         )
     session.add(AwayPeriod(user_id=user.id, start_date=start, end_date=end))
     await session.flush()
-    await duties.reconcile(session, today, keep_user_id=user.id)
+    await duties.reconcile(session, now)
     kept = []
     for duty in Duty:
         trip = await duties.current_trip(session, duty, now)
@@ -246,7 +247,11 @@ async def add_away(
     return kept
 
 
-async def remove_away(session: AsyncSession, away: AwayPeriod) -> None:
-    """Delete an away period. Duties already reassigned stay with their new people."""
+async def remove_away(session: AsyncSession, away: AwayPeriod, now: datetime) -> None:
+    """Delete an away period: the person rides on today's and upcoming trips again.
+
+    Duties already given to someone else stay with them.
+    """
     await session.delete(away)
     await session.flush()
+    await duties.add_riders(session, now.date())

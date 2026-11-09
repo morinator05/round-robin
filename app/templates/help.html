@@ -13,7 +13,7 @@
   <p><strong>Kitchen duty</strong>: every day, tidy up and clean the shared kitchen.
     {% if kitchen_people > 1 %}{{ kitchen_people }} people are assigned, but only one of them
     has to clean. Agree who cleans; whoever cleans clicks “I cleaned it”. If nobody does by
-    {{ deadline_time }} the next morning, you both get a strike.{% endif %}</p>
+    {{ deadline_time }} the next morning, {{ "you both" if kitchen_people == 2 else "all of you" }} get a strike.{% endif %}</p>
   <p><strong>Trash duty</strong>: for one week (Monday to Sunday), take out the trash.
     {% if trash_people > 1 %}{{ trash_people }} people are assigned, one of them is enough.{% endif %}</p>
   <p class="muted">The floor speaker will tell you what exactly is part of it.</p>

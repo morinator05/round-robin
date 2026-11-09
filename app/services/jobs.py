@@ -21,9 +21,7 @@ async def daily_tick(session: AsyncSession, now: datetime) -> None:
     """
     await advisory_lock(session, Lock.trips)
     missed = await duties.process_overdue(session, now)
-    for duty in Duty:
-        if now >= duties.choose_at(duty, now.date()):
-            await duties.materialize(session, duty, now.date())
+    await duties.fill_current(session, now)
     await session.commit()
     if missed:
         log.info("Marked %d potential drivers as missed", len(missed))

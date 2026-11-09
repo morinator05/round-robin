@@ -22,6 +22,8 @@ class Base(DeclarativeBase):
     """Base class of all tables."""
 
 
+# Ids are 32-bit columns; a larger number can't be one (and Postgres would refuse it).
+MAX_ID = 2**31 - 1
 # Column sizes, checked before saving (`services/users`).
 MAX_NAME_LENGTH = 100
 MAX_USERNAME_LENGTH = 50

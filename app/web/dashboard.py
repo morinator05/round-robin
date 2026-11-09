@@ -11,7 +11,7 @@ from app.deps import CurrentUser, Session
 from app.models import DishwasherClear, Duty, PotentialDriver, Status, Trip, User
 from app.services import dishwasher, duties, jobs, strikes
 from app.services.errors import DishwasherError
-from app.web.common import act, back, render, router, users_by_id
+from app.web.common import act, back, get_row, render, router, users_by_id
 
 
 @router.get("/")
@@ -213,7 +213,7 @@ async def undo_dishwasher(request: Request, session: Session, user: CurrentUser,
     """Take back your own mis-tapped emptying; from the dashboard card."""
 
     async def undo():
-        clear = await session.get(DishwasherClear, clear_id)
+        clear = await get_row(session, DishwasherClear, clear_id)
         if clear is None:
             raise DishwasherError("That entry doesn't exist any more")
         await dishwasher.undo_clear(session, clear, user, settings.now())

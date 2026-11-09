@@ -129,7 +129,8 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     keen = [rng.choice([0.2, 1, 1, 3]) for _ in residents]
 
     # A few absences, one of them usually around today.
-    for u in rng.sample([u for u in residents if not u.is_admin], k=min(3, len(residents) - 1)):
+    non_admins = [u for u in residents if not u.is_admin]
+    for u in rng.sample(non_admins, k=min(3, len(non_admins))):
         away_start = start + timedelta(days=rng.randrange(days + 4))
         away_end = away_start + timedelta(days=rng.randrange(4, 10))
         await users.add_away(session, u, away_start, away_end, at(start, 0))
@@ -216,7 +217,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-n", "--count", type=int, default=10)
-    parser.add_argument("--password", default="passwort123")
+    parser.add_argument("--password", default="password123")
     parser.add_argument("--days", type=int, default=0, help="simulate this many past days")
     parser.add_argument("--random-seed", type=int, help="same number, same history")
     args = parser.parse_args()

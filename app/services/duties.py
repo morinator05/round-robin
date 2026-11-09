@@ -15,7 +15,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.db import Lock, advisory_lock
 from app.formatting import long_date
-from app.models import Duty, PotentialDriver, Rider, Status, Trip, User
+from app.models import MAX_ID, Duty, PotentialDriver, Rider, Status, Trip, User
 from app.services import carpool, dishwasher, strikes
 from app.services.carpool import Balance, Member
 from app.services.errors import DutyError
@@ -183,15 +183,37 @@ async def materialize(session: AsyncSession, duty: Duty, day: date) -> Trip:
         )
         session.add(trip)
     else:
-        # Residents added since ride on it too.
         await session.refresh(trip, ["riders"])
-        known = {r.user_id for r in trip.riders}
-        for m in members:
-            if m.id not in known and m.rides(trip.start_date, trip.end_date):
-                trip.riders.append(Rider(user_id=m.id))
+        _add_missing_riders(trip, members)  # residents added since
     await session.flush()
     await _add_potential_drivers(session, trip, missing, {m.id: m.room for m in members})
     return await get_trip(session, duty, day)
+
+
+def _add_missing_riders(trip: Trip, members: list[Member]) -> None:
+    """Make every member who rides on `trip` (is available for it) one of its riders."""
+    known = {r.user_id for r in trip.riders}
+    for m in members:
+        if m.id not in known and m.rides(trip.start_date, trip.end_date):
+            trip.riders.append(Rider(user_id=m.id))
+
+
+async def add_riders(session: AsyncSession, today: date) -> None:
+    """Whoever is available again (back from an absence, resumed) rides on today's and
+    upcoming trips that nobody has driven yet, so they owe their share of them again."""
+    await advisory_lock(session, Lock.trips)
+    for duty in Duty:
+        members = await load_members(session, duty, today)
+        trips = await session.scalars(
+            select(Trip)
+            .where(Trip.duty == duty, Trip.is_penalty.is_(False), Trip.end_date >= today)
+            .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
+            .execution_options(populate_existing=True)
+        )
+        for trip in trips.all():
+            if not was_driven(trip):
+                _add_missing_riders(trip, members)
+    await session.flush()
 
 
 async def _add_potential_drivers(
@@ -207,42 +229,56 @@ async def _add_potential_drivers(
 
 
 async def fill_current(session: AsyncSession, now: datetime) -> None:
-    """Make sure the current trips (`current_trip`) have enough potential drivers.
+    """Make sure today's and this week's trips exist and have enough potential drivers.
 
-    Before the deadline hour that is still the previous trip: today's isn't chosen yet.
+    Only from their `choose_at` on. Before that the previous trip is still on, but its day
+    is over: nobody new is put on it.
     """
     await advisory_lock(session, Lock.trips)
     for duty in Duty:
         if now >= choose_at(duty, now.date()):
             await materialize(session, duty, now.date())
-        elif (trip := await current_trip(session, duty, now)) is not None:
-            await materialize(session, duty, trip.start_date)
 
 
-async def reconcile(session: AsyncSession, today: date, keep_user_id: int | None = None) -> None:
-    """Take whoever no longer rides off current and upcoming trips, and replace them.
+async def reconcile(session: AsyncSession, now: datetime) -> None:
+    """Take whoever no longer rides off the trips that are still open, and replace them.
 
     After someone is marked away, paused or deleted. They stop riding on trips nobody has
     driven yet, so they owe no share of them; moved-out residents (no user id) stay riders,
-    so their share is dropped, not passed on to the others. `keep_user_id` just marked
-    themselves away: a regular trip they already have stays theirs (the floor speaker can
-    excuse it). Penalty weeks move to their person's next free week instead.
+    so their share is dropped, not passed on to the others. A duty someone already has
+    stays theirs while they are away (the floor speaker can excuse it); paused or moved
+    out, it goes to someone else, except on a trip whose days are over: nobody new is put
+    on that. Penalty weeks move to their person's next free week instead.
     """
     await advisory_lock(session, Lock.trips)
+    today = now.date()
     # Per duty: dishwasher heroes ride on trash trips but not on kitchen ones.
     members = {d: {m.id: m for m in await load_members(session, d, today)} for d in Duty}
     rooms = {uid: m.room for uid, m in members[Duty.trash].items()}
+    # Yesterday's trip (last week's) is still open until its deadline. Its potential
+    # drivers are locked like `get_potential_driver` does, so none is removed while being
+    # marked done.
+    recent = select(Trip.id).where(Trip.end_date >= today - timedelta(days=1))
+    await session.execute(
+        select(PotentialDriver.id)
+        .where(PotentialDriver.trip_id.in_(recent))
+        .order_by(PotentialDriver.id)
+        .with_for_update()
+    )
     trips = await session.scalars(
         select(Trip)
-        .where(Trip.end_date >= today)
+        .where(Trip.id.in_(recent))
         .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
         .execution_options(populate_existing=True)
     )
     for trip in trips.all():
+        if deadline(trip) <= now:
+            continue
         if trip.is_penalty:
             await _reconcile_penalty(session, trip, members[trip.duty], today)
         else:
-            await _reconcile_regular(session, trip, members[trip.duty], rooms, keep_user_id)
+            replace = trip.end_date >= today
+            await _reconcile_regular(session, trip, members[trip.duty], rooms, replace)
 
 
 async def _reconcile_regular(
@@ -250,25 +286,28 @@ async def _reconcile_regular(
     trip: Trip,
     members: dict[int, Member],
     rooms: dict[int, str],
-    keep_user_id: int | None,
+    replace: bool,
 ) -> None:
-    """Take whoever no longer rides off a regular `trip` (see `reconcile`)."""
-    keeps = keep_user_id is not None and any(
-        pd.user_id == keep_user_id and pd.status is Status.pending for pd in trip.potential_drivers
-    )
+    """Take whoever no longer rides off a regular `trip`, replacing them if `replace`."""
+    # Pending potential drivers who are still members keep their duty, also when away.
+    keep = {
+        pd.user_id
+        for pd in trip.potential_drivers
+        if pd.status is Status.pending and pd.user_id in members
+    }
 
-    def stays(user_id: int | None) -> bool:
-        if keeps and user_id == keep_user_id:
-            return True
+    def rides(user_id: int | None) -> bool:
         member = members.get(user_id)
         return member is not None and member.rides(trip.start_date, trip.end_date)
 
-    riders = [r for r in trip.riders if r.user_id is None or stays(r.user_id)]
+    riders = [r for r in trip.riders if r.user_id is None or r.user_id in keep or rides(r.user_id)]
     if not was_driven(trip) and len(riders) != len(trip.riders):
         trip.riders = riders
         await session.flush()
     gone = [
-        pd for pd in trip.potential_drivers if pd.status is Status.pending and not stays(pd.user_id)
+        pd
+        for pd in trip.potential_drivers
+        if pd.status is Status.pending and pd.user_id not in keep
     ]
     if not gone:
         return
@@ -276,7 +315,8 @@ async def _reconcile_regular(
         trip.potential_drivers.remove(pd)
         await session.delete(pd)
     await session.flush()
-    await _add_potential_drivers(session, trip, len(gone), rooms)
+    if replace:
+        await _add_potential_drivers(session, trip, len(gone), rooms)
 
 
 async def _reconcile_penalty(
@@ -304,6 +344,7 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
             select(PotentialDriver)
             .join(PotentialDriver.trip)
             .where(PotentialDriver.status == Status.pending)
+            .order_by(PotentialDriver.id)
             .options(selectinload(PotentialDriver.trip))
             # Waits for a duty being marked right now (`get_potential_driver` locks it too);
             # Postgres then checks the status again, so it isn't struck after being marked.
@@ -336,15 +377,20 @@ async def get_potential_driver(session: AsyncSession, potential_driver_id: int) 
     Raises:
         DutyError: if there is no such potential driver.
     """
-    trip_id = await session.scalar(
-        select(PotentialDriver.trip_id).where(PotentialDriver.id == potential_driver_id)
-    )
+    trip_id = None
+    if 0 < potential_driver_id <= MAX_ID:
+        trip_id = await session.scalar(
+            select(PotentialDriver.trip_id).where(PotentialDriver.id == potential_driver_id)
+        )
     if trip_id is None:
         raise DutyError("Duty not found")
     # Locked before they are loaded, so a request's (fresh) session reads them as they are
     # after the other transaction finished.
     await session.execute(
-        select(PotentialDriver.id).where(PotentialDriver.trip_id == trip_id).with_for_update()
+        select(PotentialDriver.id)
+        .where(PotentialDriver.trip_id == trip_id)
+        .order_by(PotentialDriver.id)
+        .with_for_update()
     )
     pd = await session.scalar(
         select(PotentialDriver)

@@ -13,7 +13,16 @@ from app.deps import AdminUser, Session
 from app.models import AwayPeriod, DishwasherClear, PotentialDriver, Status, Strike, Trip, User
 from app.services import dishwasher, duties, jobs, strikes, users
 from app.services.errors import UserError
-from app.web.common import act, back, get_or_404, parse_id, render, router, start_session
+from app.web.common import (
+    act,
+    back,
+    flash,
+    get_or_404,
+    parse_id,
+    render,
+    router,
+    start_session,
+)
 
 # The admin page shows the duties of this many days, the older half folded away.
 DUTY_DAYS = 14
@@ -240,8 +249,15 @@ async def admin_add_away(
 
     async def add():
         target = await _resident(session, user_id, "Choose who is away")
-        await users.add_away(session, target, start_date, end_date, settings.now())
-        return f"Away period added for {target.display_name}"
+        kept = await users.add_away(session, target, start_date, end_date, settings.now())
+        name = target.display_name
+        for duty in kept:
+            flash(
+                request,
+                f"{name}'s current {duty.label.lower()} stays with them; excuse it if they "
+                "can't do it",
+            )
+        return f"Away period added for {name}"
 
     return await act(request, session, add, "/admin")
 
@@ -252,7 +268,7 @@ async def admin_delete_away(request: Request, session: Session, user: AdminUser,
     away = await get_or_404(session, AwayPeriod, away_id)
 
     async def delete():
-        await users.remove_away(session, away)
+        await users.remove_away(session, away, settings.now())
         return "Away period deleted"
 
     return await act(request, session, delete, "/admin")

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import deps, formatting
 from app.config import settings
 from app.deps import require_user
-from app.models import Duty, Status, User
+from app.models import MAX_ID, Duty, Status, User
 from app.services import auth, strikes, users
 from app.services.errors import ServiceError
 
@@ -181,10 +181,6 @@ async def act(
     return redirect("/" if card else to)
 
 
-# Ids are 32-bit columns; a larger number can't be one (and Postgres would refuse it).
-MAX_ID = 2**31 - 1
-
-
 def parse_id(value: str) -> int | None:
     """`value` as a row id, or None if it can't be one (e.g. "" from an unchosen select)."""
     if value.isascii() and value.isdigit() and 0 < int(value) <= MAX_ID:
@@ -192,10 +188,14 @@ def parse_id(value: str) -> int | None:
     return None
 
 
+async def get_row(session: AsyncSession, model: type, id: int):
+    """The row of `model` with `id`, or None (also for ids no row can have)."""
+    return await session.get(model, id) if 0 < id <= MAX_ID else None
+
+
 async def get_or_404(session: AsyncSession, model: type, id: int):
     """The row of `model` with `id`, or a 404 page."""
-    row = await session.get(model, id) if id <= MAX_ID else None
-    if row is None:
+    if (row := await get_row(session, model, id)) is None:
         raise HTTPException(404)
     return row
 

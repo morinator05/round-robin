@@ -6,6 +6,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.db import Lock, advisory_lock
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import carpool
 
@@ -156,6 +157,8 @@ async def check_threshold(session: AsyncSession, user_id: int, today: date) -> T
     if user is None or not user.active:
         return None
 
+    # Two strikes given at once (the daily job, the floor speaker) mustn't pick one week.
+    await advisory_lock(session, Lock.trips)
     week = await next_free_penalty_week(session, user_id, today)
     trip = Trip(
         duty=Duty.trash,

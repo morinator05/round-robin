@@ -124,6 +124,11 @@ async def test_login_page_shows_nothing_personal(session, client, clock):
     links = {h for h in re.findall(r'href="([^"]*)"', r.text) if not h.startswith("/static/")}
     assert links <= {"/", "/login"}
 
+    # The page to come back to survives a failed login, query string and all.
+    data = {"username": "p2", "password": "wrong", "next": "/history?until=2026-11-01&x=1"}
+    r = await client.post("/login", data=data)
+    assert r.headers["location"] == "/login?next=/history%3Funtil%3D2026-11-01%26x%3D1"
+
     # Not after a failed login either, also with input no account could have.
     for username, password in (("p2", "wrong"), ("x" * 100, "x"), ("p2", "x" * 2000)):
         r = await client.post("/login", data={"username": username, "password": password})

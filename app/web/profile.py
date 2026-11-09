@@ -12,7 +12,7 @@ from app.deps import CurrentUser, Session
 from app.models import AwayPeriod, PotentialDriver, Strike, Trip
 from app.services import auth, dishwasher, users
 from app.services.errors import UserError
-from app.web.common import act, flash, redirect, render, router, start_session
+from app.web.common import act, flash, get_row, redirect, render, router, start_session
 
 
 @router.get("/me")
@@ -80,12 +80,12 @@ async def add_away(
 @router.post("/me/away/{away_id}/delete")
 async def delete_away(request: Request, session: Session, user: CurrentUser, away_id: int):
     """Delete one of your away periods."""
-    away = await session.get(AwayPeriod, away_id)
+    away = await get_row(session, AwayPeriod, away_id)
     if away is None or away.user_id != user.id:
         raise HTTPException(404)
 
     async def delete():
-        await users.remove_away(session, away)
+        await users.remove_away(session, away, settings.now())
         return "Away period deleted"
 
     return await act(request, session, delete, "/me")

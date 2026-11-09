@@ -5,15 +5,18 @@ import re
 from datetime import timedelta
 
 from sqlalchemy import func, select
+from starlette.routing import Route
 
 from app.config import settings
 from app.formatting import long_date, short_date
+from app.main import app
 from app.models import AwayPeriod, DishwasherClear, Duty, PotentialDriver, Status, User
 from app.services import dishwasher, duties, strikes, users
 from app.web import person_html
 from tests.helpers import (
     MONDAY,
     TUESDAY,
+    all_routes,
     at,
     follow,
     give_strikes,
@@ -307,14 +310,17 @@ async def test_profile_page(session, browser, clock):
     assert 'hx-confirm="Delete your absence from' in html.unescape((await me.get("/me")).text)
 
 
-async def test_help_page(session, browser):
+async def test_help_page(session, browser, monkeypatch):
     await make_users(session, n=3)
-    page = words(await (await browser("p2")).get("/help"))
+    resident = await browser("p2")
+    page = words(await resident.get("/help"))
     assert "Kitchen duty" in page and "For the floor speaker" not in page
     # The pair rule spelled out, and who the floor speaker is.
     assert "Agree who cleans" in page and "you both get a strike" in page
     assert "Your floor speaker: Person" in page
     assert "For the floor speaker" in words(await (await browser("p1")).get("/help"))
+    monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
+    assert "all of you get a strike" in words(await resident.get("/help"))
 
 
 # --- admin ----------------------------------------------------------------------
@@ -395,6 +401,11 @@ async def test_admin_manages_residents(session, browser):
     # A duty that's gone (e.g. on an old page) is a message, not an error page.
     r = await admin.post("/admin/potential-drivers/999999/excuse")
     assert r.headers["location"] == "/admin" and "Duty not found" in await follow(admin, r)
+    # Ids no row can have, also ones too large for the database: not found, on every route.
+    for route in all_routes(app.routes):
+        if isinstance(route, Route) and route.param_convertors and "POST" in route.methods:
+            path = route.path.format(**dict.fromkeys(route.param_convertors, 2**40))
+            assert (await admin.post(path)).status_code < 500, path
     assert f'hx-confirm="Pause {people[2].display_name}?' in html.unescape(
         (await admin.get("/admin")).text
     )
@@ -404,7 +415,8 @@ async def test_admin_manages_residents(session, browser):
 
 async def test_admin_absences(session, browser, clock):
     people = await make_users(session, n=4)
-    resident = people[2]
+    pair = await kitchen_pair(session, people, clock.today, admin_off=True)
+    resident = next(p for p in people[1:] if p.id not in pair.ids)
     later = clock.today + timedelta(days=5)
     end = later + timedelta(days=2)
     form = {
@@ -421,11 +433,16 @@ async def test_admin_absences(session, browser, clock):
     # A wrong period comes back as a message.
     r = await admin.post("/admin/aways", data=form | {"end_date": clock.today.isoformat()})
     assert "The end can't be before the start" in await follow(admin, r)
+    # Over a duty the resident already has: it stays theirs, and the floor speaker is told.
+    today = clock.today.isoformat()
+    data = {"user_id": str(pair.p1.id), "start_date": today, "end_date": today}
+    page = await follow(admin, await admin.post("/admin/aways", data=data))
+    assert f"{pair.p1.display_name}'s current kitchen duty stays with them" in page
 
-    away_id = await session.scalar(select(AwayPeriod.id))
+    away_id = await session.scalar(select(AwayPeriod.id).where(AwayPeriod.user_id == resident.id))
     r = await admin.post(f"/admin/aways/{away_id}/delete")
     assert r.headers["location"] == "/admin"
-    assert await session.scalar(select(func.count(AwayPeriod.id))) == 0
+    assert away_id not in set(await session.scalars(select(AwayPeriod.id)))
 
 
 async def test_admin_strike_and_duty_lists(session, browser, clock):

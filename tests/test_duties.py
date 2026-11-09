@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.config import settings
-from app.models import Duty, Status, Trip, User
+from app.models import AwayPeriod, Duty, Status, Trip, User
 from app.services import carpool, duties, jobs, strikes, users
 from app.services.duties import DutyError
 from tests.helpers import (
@@ -66,30 +66,47 @@ async def test_daily_tick_and_deadlines(session):
     assert trash.potential_drivers[0].status is Status.missed
 
 
-async def test_top_up(session):
+async def test_top_up(session, monkeypatch):
+    """A trip that is short of people gets more as residents move in, but only while it is
+    on: not once someone drove it, and not after its day."""
+    monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
+    hour = settings.deadline_hour
     # The daily job ran before anyone lived on the floor.
     await jobs.daily_tick(session, at(MONDAY))
     assert (await duties.get_trip(session, Duty.kitchen, MONDAY)).potential_drivers == []
-
     [first] = await make_users(session, n=1)
     await jobs.daily_tick(session, at(MONDAY, 10))
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
     assert [pd.user_id for pd in kitchen.potential_drivers] == [first.id]
     assert len((await duties.get_trip(session, Duty.trash, MONDAY)).potential_drivers) == 1
 
-    # They do it alone. Someone moving in later isn't put on the done trip (and struck).
+    async def move_in(username, now):
+        room = f"E1{20 + len(username)}"
+        new = await users.create(
+            session, name="New", room_number=room, username=username, password="secret123"
+        )
+        await duties.fill_current(session, now)  # like adding a resident on the admin page
+        await session.commit()
+        return new
+
+    # Done already: nobody is added to it (and struck for it).
     pd = await duties.get_potential_driver(session, kitchen.potential_drivers[0].id)
     await duties.mark_as_driver(session, pd, first, at(MONDAY, 11))
     await session.commit()
-    newbie = await users.create(
-        session, name="New", room_number="E120", username="new", password="secret123"
-    )
-    await duties.fill_current(session, at(MONDAY, 12))
-    await session.commit()
+    await move_in("second", at(MONDAY, 12))
     kitchen = await reload_trip(session, Duty.kitchen, MONDAY)
     assert [pd.user_id for pd in kitchen.potential_drivers] == [first.id]
-    await jobs.daily_tick(session, at(TUESDAY, 13))
-    assert await strikes.active_strikes(session, newbie.id) == []
+
+    # Tuesday's is one short. Moving in the next morning doesn't put you on it: its day is
+    # over, there's only an hour left to do it.
+    await jobs.daily_tick(session, at(TUESDAY, hour))
+    assert len((await reload_trip(session, Duty.kitchen, TUESDAY)).potential_drivers) == 2
+    third = await move_in("third", at(WEDNESDAY, hour - 1))
+    tuesday = await reload_trip(session, Duty.kitchen, TUESDAY)
+    assert third.id not in {pd.user_id for pd in tuesday.potential_drivers}
+    assert third.id not in {r.user_id for r in tuesday.riders}
+    await jobs.daily_tick(session, at(WEDNESDAY, hour))
+    assert await strikes.active_strikes(session, third.id) == []
 
 
 async def test_marking_done(session):
@@ -320,20 +337,24 @@ async def test_each_plan_is_what_really_happens(session, which, next_morning):
     assert real == preview.plans[driver.user_id][0].potential_drivers
 
 
+@pytest.mark.parametrize("next_morning", [False, True], ids=["same-day", "next-morning"])
 @pytest.mark.parametrize("how", ["away", "paused", "deleted"])
-async def test_unavailable_resident(session, how):
-    """Someone on today's kitchen duty and someone who only rides on it become unavailable."""
+async def test_unavailable_resident(session, how, next_morning):
+    """Someone on Monday's kitchen duty and someone who only rides on it become unavailable,
+    on Monday or on Tuesday morning, before its deadline."""
     people = await make_users(session, n=5)
     pair = await kitchen_pair(session, people)
-    on_duty_id = pair.p1.id
+    on_duty_id, partner_id = pair.p1.id, pair.p2.id
     rider_id = next(p.id for p in people if p.id not in pair.ids)
-    for person in (await session.get(User, rider_id), pair.p1):
+    now = at(TUESDAY, settings.deadline_hour - 1) if next_morning else at(MONDAY, 12)
+    # The one on duty first: the change for the other one must not undo what it decided.
+    for person in (pair.p1, await session.get(User, rider_id)):
         if how == "away":
-            await users.add_away(session, person, MONDAY, MONDAY + timedelta(days=3), at(MONDAY))
+            await users.add_away(session, person, MONDAY, MONDAY + timedelta(days=5), now)
         elif how == "paused":
-            await users.set_active(session, person, False, at(MONDAY, 12))
+            await users.set_active(session, person, False, now)
         else:
-            await users.delete(session, person, at(MONDAY, 12))
+            await users.delete(session, person, now)
     await session.commit()
 
     trip = await reload_trip(session, Duty.kitchen, MONDAY)
@@ -342,17 +363,35 @@ async def test_unavailable_resident(session, how):
     # Riding no more, so they owe no share of it.
     assert rider_id not in riders
     # Not chosen while unavailable.
-    assert on_duty_id not in planned(await plans(session, MONDAY, days=3))
+    assert on_duty_id not in planned(await plans(session, now.date(), days=3))
     if how == "away":
         # A duty you already have stays yours (the floor speaker can excuse it).
         assert on_duty_id in on_duty and on_duty_id in riders
     else:
-        # Replaced right away; the trip keeps its two.
-        assert len(on_duty) == 2 and on_duty_id not in on_duty and None not in on_duty
-        assert on_duty_id not in riders
+        assert on_duty_id not in on_duty and on_duty_id not in riders
+        if next_morning:
+            # Too late for a stand-in: just off it, so no strike at the deadline.
+            assert on_duty == [partner_id]
+        else:
+            # Replaced right away; the trip keeps its two.
+            assert len(on_duty) == 2 and None not in on_duty
     if how == "deleted":
         # Their part of the history stays, without their name.
         assert riders.count(None) == 2
+    if how == "paused" and next_morning:
+        await jobs.daily_tick(session, at(TUESDAY, settings.deadline_hour))
+        assert await strikes.active_strikes(session, on_duty_id) == []
+
+    # Available again the same day: a rider again, so they owe their share again.
+    if how != "deleted" and not next_morning:
+        rider = await session.get(User, rider_id)
+        if how == "away":
+            away = await session.scalar(select(AwayPeriod).where(AwayPeriod.user_id == rider_id))
+            await users.remove_away(session, away, now)
+        else:
+            await users.set_active(session, rider, True, now)
+        trip = await reload_trip(session, Duty.kitchen, MONDAY)
+        assert rider_id in {r.user_id for r in trip.riders}
 
 
 async def test_fair_month_then_moving_out(session):

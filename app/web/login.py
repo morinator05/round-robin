@@ -1,6 +1,7 @@
 """Logging in and out."""
 
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import Form, Request
 
@@ -32,7 +33,8 @@ async def login(
         user = await auth.login(session, username, password, client_ip)
     except UserError as e:
         flash(request, str(e), "error")
-        return redirect(f"/login?next={safe_next(next)}")
+        # Encoded like the redirect to the login page, so a query string in it survives.
+        return redirect(f"/login?{urlencode({'next': safe_next(next)}, safe='/')}")
     start_session(request, user)
     return redirect(safe_next(next))
 
