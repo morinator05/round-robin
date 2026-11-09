@@ -16,7 +16,7 @@ uv sync
 uv run alembic upgrade head
 uv run fastapi dev app/main.py              # dev server with reload, http://localhost:8000
 uv run pytest                               # DB tests are skipped if Postgres is down
-uv run pytest tests/test_rules.py::test_tick_assigns_kitchen_and_trash   # one test
+uv run pytest tests/test_duties.py::test_daily_tick_and_deadlines   # one test
 uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
 uv run python scripts/seed.py [--days 30]   # test residents (+ a simulated month on an empty DB)
@@ -114,9 +114,19 @@ current/upcoming trips and chooses replacements.
   the `public` schema and recreates all tables per test from `Base.metadata` (not via
   migrations), disables the scheduler, and monkeypatches `app.db.SessionLocal`. Use the
   `session` fixture.
-- `tests/test_carpool.py`: the pure fairness logic. `tests/test_rules.py`: rules against
-  the DB, using `make_users` and `at(day, hour)` with a fixed `MONDAY`. Web pages are
-  tested through `httpx.AsyncClient(transport=httpx.ASGITransport(app=app))`.
+- At most 50 test functions: extend a scenario test (or its parametrize) rather than add
+  a new one. `test_carpool.py` is the pure fairness logic; `test_duties.py`,
+  `test_strikes.py`, `test_dishwasher.py`, `test_users.py` the rules against the DB;
+  `test_auth.py` logins and security; `test_pages.py` what the pages say.
+- `tests/helpers.py`: fixed dates (`MONDAY`, `WEDNESDAY`, …), `at(day, hour)`,
+  `make_users`, `kitchen_pair`, `give_strikes`, `reload_trip`, `plans`, and for pages
+  `words` (the visible text: assert on that, not on markup), `section`, `follow`.
+- Pages: the `browser` fixture opens logged-in clients (`await browser("p2")`) on the app
+  through `httpx.ASGITransport`; `client` is one that isn't logged in. Both pin the app's
+  clock with the `clock` fixture (Wednesday noon; `clock.set(day, hour)`), so no test
+  depends on the real date. `throttles(ip=3)` lowers the login limits.
+- The app commits in its own sessions: after a request, reload with `reload_trip` or
+  `session.expire_all()` before reading what it changed.
 - pytest runs with `asyncio_mode = "auto"`, so async tests need no marker.
 
 ## Conventions

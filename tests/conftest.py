@@ -17,16 +17,26 @@ os.environ.update(
     DISHWASHER_HEROES="2",
 )
 
+from contextlib import AsyncExitStack  # noqa: E402
+
 import asyncpg  # noqa: E402
+import httpx  # noqa: E402
 import pytest  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
-from app import db  # noqa: E402
+from app import db, web  # noqa: E402
 from app.config import settings  # noqa: E402
+from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
+from app.services.login_throttle import (  # noqa: E402
+    ACCOUNT_MAX_FAILURES,
+    MAX_FAILURES,
+    LoginThrottle,
+)
+from tests.helpers import WEDNESDAY, at, login  # noqa: E402
 
 # The fixtures drop the whole schema: never let an exported DATABASE_URL point them at
 # the development or production database.
@@ -75,3 +85,61 @@ async def session(session_factory):
     """A database session for the test."""
     async with session_factory() as s:
         yield s
+
+
+@pytest.fixture(autouse=True)
+def throttles(monkeypatch):
+    """Fresh login limits for every test; call it to set lower ones."""
+
+    def set_limits(ip=MAX_FAILURES, account=ACCOUNT_MAX_FAILURES):
+        monkeypatch.setattr(web, "login_throttle", LoginThrottle(max_failures=ip))
+        monkeypatch.setattr(web, "account_throttle", LoginThrottle(max_failures=account))
+
+    set_limits()
+    return set_limits
+
+
+class Clock:
+    """The app's clock (`settings.now`), fixed so pages don't depend on the real date."""
+
+    def __init__(self, monkeypatch):
+        self.now = at(WEDNESDAY, 12)  # after the deadline hour, in the middle of a week
+        monkeypatch.setattr(type(settings), "now", lambda _: self.now)
+
+    @property
+    def today(self):
+        return self.now.date()
+
+    def set(self, day, hour=12, minute=0):
+        self.now = at(day, hour, minute)
+
+
+@pytest.fixture
+def clock(monkeypatch) -> Clock:
+    return Clock(monkeypatch)
+
+
+@pytest.fixture
+async def browser(session_factory, clock):
+    """Opens browsers on the app (no server), each with its own cookies.
+
+    `await browser("p2")` is logged in as p2; `ip` is the address it connects from.
+    """
+    async with AsyncExitStack() as stack:
+
+        async def open_browser(username=None, ip="127.0.0.1"):
+            transport = httpx.ASGITransport(app=app, client=(ip, 1234))
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(transport=transport, base_url="http://test")
+            )
+            if username:
+                await login(client, username)
+            return client
+
+        yield open_browser
+
+
+@pytest.fixture
+async def client(browser):
+    """A browser that isn't logged in."""
+    return await browser()
