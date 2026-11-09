@@ -8,32 +8,20 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from fractions import Fraction
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.db import Lock, advisory_lock
 from app.formatting import long_date
-from app.models import Duty, PotentialDriver, Rider, Status, Trip, User
+from app.models import MAX_ID, Duty, PotentialDriver, Rider, Status, Trip, User
 from app.services import carpool, dishwasher, strikes
 from app.services.carpool import Balance, Member
+from app.services.errors import DutyError
 
-
-class DutyError(Exception):
-    """An action on a duty isn't allowed; the message is shown to the user as is."""
-
-
-# Arbitrary, app-wide id for the Postgres advisory lock that serializes changes to trips.
-DUTIES_LOCK_ID = 4004
-
-
-async def lock_trips(session: AsyncSession) -> None:
-    """Wait until no other transaction creates or reassigns trips, until this one ends.
-
-    Taken by the daily job and by admin actions that reassign duties, so they can't both
-    create the same trip. Re-entrant within one transaction.
-    """
-    await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": DUTIES_LOCK_ID})
+# How long a "Done" can be taken back (a mis-tap), see `undo_driver`.
+UNDO_MINUTES = 10
 
 
 def potential_drivers_per_trip(duty: Duty) -> int:
@@ -52,8 +40,10 @@ def trip_bounds(duty: Duty, day: date) -> tuple[date, date]:
 
 
 def deadline(trip: Trip) -> datetime:
-    """Until when the trip can be marked driven: the deadline hour on the day after it
-    ended. After that it counts as missed."""
+    """Until when the trip can be marked driven: the deadline hour on the day after it ended.
+
+    After that it counts as missed.
+    """
     day = trip.end_date + timedelta(days=1)
     return datetime.combine(day, time(settings.deadline_hour), settings.tz)
 
@@ -61,9 +51,8 @@ def deadline(trip: Trip) -> datetime:
 def choose_at(duty: Duty, day: date) -> datetime:
     """When the potential drivers of the trip containing `day` are chosen.
 
-    At the deadline hour of the trip's first day: right after the previous trip's deadline
-    (`deadline`), so that trip is done or missed by then. That
-    way only one trip is ever open, and the preview can be exact for each outcome of it.
+    The deadline hour of the trip's first day, right after the previous trip's deadline,
+    so only one trip is ever open and the preview can be exact for each outcome of it.
     """
     start, _ = trip_bounds(duty, day)
     return datetime.combine(start, time(settings.deadline_hour), settings.tz)
@@ -89,42 +78,32 @@ async def load_members(session: AsyncSession, duty: Duty, today: date) -> list[M
     heroes: they get it off kitchen duty, without owing a share for it.
     """
     users = await session.scalars(
-        select(User).where(User.active.is_(True)).options(selectinload(User.away_periods))
+        select(User)
+        .where(User.active.is_(True))
+        .options(selectinload(User.away_periods))
+        .execution_options(populate_existing=True)
     )
-    off: set[int] = set()
-    if duty is Duty.kitchen:
-        off = set(await dishwasher.heroes(session, today))
-    hero_month = dishwasher.month_bounds(today)
+    heroes = set(await dishwasher.heroes(session, today)) if duty is Duty.kitchen else set()
+    hero_month = (dishwasher.month_bounds(today),)
     return [
         Member(
             id=u.id,
             room=u.room_number,
             away=tuple((a.start_date, a.end_date) for a in u.away_periods)
-            + ((hero_month,) if u.id in off else ()),
+            + (hero_month if u.id in heroes else ()),
         )
         for u in users
     ]
 
 
-def drove(trip: Trip, pd: PotentialDriver) -> bool:
-    """Whether `pd` drove `trip` and earns the drive. Penalty trips earn nothing."""
-    return not trip.is_penalty and pd.status is Status.drove
-
-
 def was_driven(trip: Trip) -> bool:
     """Whether `trip` counts for fairness: a regular trip that someone drove."""
-    return not trip.is_penalty and any(pd.status is Status.drove for pd in trip.potential_drivers)
+    return not trip.is_penalty and trip.driver is not None
 
 
-def pending_share(trip: Trip, pd: PotentialDriver) -> Fraction:
-    """While nobody has driven a trip, its pending potential drivers share it.
-
-    Counts only for choosing (`Balance.pending_share`), so tomorrow's trip doesn't choose
-    them again before anyone drove; their score doesn't change.
-    """
-    if trip.is_penalty or pd.status is not Status.pending:
-        return Fraction(0)
-    if any(x.status is Status.drove for x in trip.potential_drivers):
+def reserved_share(trip: Trip, pd: PotentialDriver) -> Fraction:
+    """`pd`'s part of a trip nobody has driven yet, for choosing (`Balance.pending_share`)."""
+    if trip.is_penalty or pd.status is not Status.pending or trip.driver is not None:
         return Fraction(0)
     return Fraction(1, sum(x.status is Status.pending for x in trip.potential_drivers))
 
@@ -132,30 +111,42 @@ def pending_share(trip: Trip, pd: PotentialDriver) -> Fraction:
 async def load_balances(session: AsyncSession, duty: Duty) -> dict[int, Balance]:
     """Every user's balance in the carpool of `duty`, computed from all trips so far.
 
-    Balances are never stored; they are always recomputed from the history. As in the
-    carpool algorithm, a trip counts only once someone drove it: one that was missed,
-    excused or disputed (or is still open) charges nobody. So the scores always sum to 0,
-    apart from the scores of residents who moved out.
+    Only driven trips count (`was_driven`), so the scores sum to 0, apart from the scores
+    of residents who moved out.
     """
     balances: dict[int, Balance] = {}
-
-    trips = (
-        await session.scalars(
-            select(Trip)
-            .where(Trip.duty == duty)
-            .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
-        )
-    ).all()
+    trips = await session.scalars(
+        select(Trip)
+        .where(Trip.duty == duty, Trip.is_penalty.is_(False))
+        .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
+        .execution_options(populate_existing=True)
+    )
     for trip in trips:
         if was_driven(trip):
             carpool.charge_riders(balances, [r.user_id for r in trip.riders])
         for pd in trip.potential_drivers:
             if pd.user_id is None:
                 continue
-            if drove(trip, pd):
+            if pd.status is Status.drove:
                 carpool.credit_driver(balances, pd.user_id, trip.start_date)
-            carpool.reserve_share(balances, pd.user_id, pending_share(trip, pd))
+            carpool.reserve_share(balances, pd.user_id, reserved_share(trip, pd))
     return balances
+
+
+async def points(session: AsyncSession, users: list[User]) -> dict[Duty, dict[int, int]]:
+    """Each user's score per duty as whole points (`carpool.display_points`).
+
+    Among equal scores, whoever is chosen sooner shows fewer points.
+    """
+    ids = [u.id for u in users]
+    rooms = {u.id: u.room_number for u in users}
+    result = {}
+    for duty in Duty:
+        balances = await load_balances(session, duty)
+        queue = carpool.choose_potential_drivers(balances, ids, len(ids), rooms)
+        scores = {uid: balances[uid].score if uid in balances else Fraction(0) for uid in ids}
+        result[duty] = carpool.display_points(scores, queue)
+    return result
 
 
 async def get_trip(session: AsyncSession, duty: Duty, day: date) -> Trip | None:
@@ -172,44 +163,57 @@ async def materialize(session: AsyncSession, duty: Duty, day: date) -> Trip:
     """Create the trip containing `day` and choose its potential drivers.
 
     An existing trip that has fewer potential drivers than needed (e.g. it was created
-    before enough residents existed) is topped up.
+    before enough residents existed) is topped up, unless someone already drove it.
     """
-    existing = await get_trip(session, duty, day)
-    n = potential_drivers_per_trip(duty)
-    if existing is not None:
-        already_driven = any(pd.status is Status.drove for pd in existing.potential_drivers)
-        if existing.is_penalty or already_driven or len(existing.potential_drivers) >= n:
-            return existing
-        await _top_up(session, existing, n - len(existing.potential_drivers))
-        return await get_trip(session, duty, day)
-
-    start, end = trip_bounds(duty, day)
-    members = await load_members(session, duty, day)
-    rooms = {m.id: m.room for m in members}
-    riders = [m.id for m in members if m.rides(start, end)]
-
-    balances = await load_balances(session, duty)
-    carpool.charge_riders(balances, riders)
-    chosen = carpool.choose_potential_drivers(balances, riders, n, rooms)
-
-    trip = Trip(duty=duty, start_date=start, end_date=end, is_penalty=False)
-    trip.riders = [Rider(user_id=uid) for uid in riders]
-    trip.potential_drivers = [PotentialDriver(user_id=uid) for uid in chosen]
-    session.add(trip)
+    trip = await get_trip(session, duty, day)
+    missing = potential_drivers_per_trip(duty) - len(trip.potential_drivers if trip else [])
+    if trip is not None and (trip.is_penalty or trip.driver is not None or missing <= 0):
+        return trip
+    members = await load_members(session, duty, trip.start_date if trip else day)
+    if trip is None:
+        start, end = trip_bounds(duty, day)
+        riders = [Rider(user_id=m.id) for m in members if m.rides(start, end)]
+        trip = Trip(
+            duty=duty,
+            start_date=start,
+            end_date=end,
+            is_penalty=False,
+            riders=riders,
+            potential_drivers=[],
+        )
+        session.add(trip)
+    else:
+        await session.refresh(trip, ["riders"])
+        _add_missing_riders(trip, members)  # residents added since
     await session.flush()
+    await _add_potential_drivers(session, trip, missing, {m.id: m.room for m in members})
     return await get_trip(session, duty, day)
 
 
-async def _top_up(session: AsyncSession, trip: Trip, missing: int) -> None:
-    """Add `missing` potential drivers to an existing trip, including residents added since."""
-    members = await load_members(session, trip.duty, trip.start_date)
-    await session.refresh(trip, ["riders"])
+def _add_missing_riders(trip: Trip, members: list[Member]) -> None:
+    """Make every member who rides on `trip` (is available for it) one of its riders."""
     known = {r.user_id for r in trip.riders}
     for m in members:
         if m.id not in known and m.rides(trip.start_date, trip.end_date):
             trip.riders.append(Rider(user_id=m.id))
+
+
+async def add_riders(session: AsyncSession, today: date) -> None:
+    """Whoever is available again (back from an absence, resumed) rides on today's and
+    upcoming trips that nobody has driven yet, so they owe their share of them again."""
+    await advisory_lock(session, Lock.trips)
+    for duty in Duty:
+        members = await load_members(session, duty, today)
+        trips = await session.scalars(
+            select(Trip)
+            .where(Trip.duty == duty, Trip.is_penalty.is_(False), Trip.end_date >= today)
+            .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
+            .execution_options(populate_existing=True)
+        )
+        for trip in trips.all():
+            if not was_driven(trip):
+                _add_missing_riders(trip, members)
     await session.flush()
-    await _add_potential_drivers(session, trip, missing, {m.id: m.room for m in members})
 
 
 async def _add_potential_drivers(
@@ -225,81 +229,93 @@ async def _add_potential_drivers(
 
 
 async def fill_current(session: AsyncSession, now: datetime) -> None:
-    """Make sure the current trips (`current_trip`) have enough potential drivers.
+    """Make sure today's and this week's trips exist and have enough potential drivers.
 
-    Before the deadline hour that is still yesterday's (last week's) trip: today's isn't
-    chosen before then (`choose_at`), so the previous one's outcome counts for it.
+    Only from their `choose_at` on. Before that the previous trip is still on, but its day
+    is over: nobody new is put on it.
     """
-    await lock_trips(session)
+    await advisory_lock(session, Lock.trips)
     for duty in Duty:
         if now >= choose_at(duty, now.date()):
             await materialize(session, duty, now.date())
-        elif (trip := await current_trip(session, duty, now)) is not None:
-            await materialize(session, duty, trip.start_date)
 
 
-async def reconcile(session: AsyncSession, today: date, keep_user_id: int | None = None) -> None:
-    """Replace potential drivers of current/upcoming trips who no longer ride on them.
+async def reconcile(session: AsyncSession, now: datetime) -> None:
+    """Take whoever no longer rides off the trips that are still open, and replace them.
 
-    `keep_user_id`: a resident who just marked themselves away. A regular trip they are
-    already a pending potential driver on stays theirs (and they stay a rider of it); the
-    absence only keeps them from being chosen again. The floor speaker can excuse it.
-
-    Called after someone marks themselves away, is deactivated or deleted. Everyone who no
-    longer rides is removed from the riders of trips nobody has driven yet, so they aren't
-    charged a share. Moved-out residents (no user id) stay: like in the history, their
-    share is dropped, not passed on to the others.
-    Penalty weeks can't go to someone else: they move to the person's next free week, or,
-    for a paused resident, are cancelled until they are back (`users.set_active`).
+    After someone is marked away, paused or deleted. They stop riding on trips nobody has
+    driven yet, so they owe no share of them; moved-out residents (no user id) stay riders,
+    so their share is dropped, not passed on to the others. A duty someone already has
+    stays theirs while they are away (the floor speaker can excuse it); paused or moved
+    out, it goes to someone else, except on a trip whose days are over: nobody new is put
+    on that. Penalty weeks move to their person's next free week instead.
     """
-    await lock_trips(session)
+    await advisory_lock(session, Lock.trips)
+    today = now.date()
     # Per duty: dishwasher heroes ride on trash trips but not on kitchen ones.
     members = {d: {m.id: m for m in await load_members(session, d, today)} for d in Duty}
     rooms = {uid: m.room for uid, m in members[Duty.trash].items()}
-
-    def rides(user_id: int | None, trip: Trip) -> bool:
-        member = members[trip.duty].get(user_id)
-        return member is not None and member.rides(trip.start_date, trip.end_date)
-
-    trips = (
-        await session.scalars(
-            select(Trip)
-            .where(Trip.end_date >= today)
-            .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
-        )
-    ).all()
-    for trip in trips:
+    # Yesterday's trip (last week's) is still open until its deadline. Its potential
+    # drivers are locked like `get_potential_driver` does, so none is removed while being
+    # marked done.
+    recent = select(Trip.id).where(Trip.end_date >= today - timedelta(days=1))
+    await session.execute(
+        select(PotentialDriver.id)
+        .where(PotentialDriver.trip_id.in_(recent))
+        .order_by(PotentialDriver.id)
+        .with_for_update()
+    )
+    trips = await session.scalars(
+        select(Trip)
+        .where(Trip.id.in_(recent))
+        .options(selectinload(Trip.riders), selectinload(Trip.potential_drivers))
+        .execution_options(populate_existing=True)
+    )
+    for trip in trips.all():
+        if deadline(trip) <= now:
+            continue
         if trip.is_penalty:
             await _reconcile_penalty(session, trip, members[trip.duty], today)
-            continue
-        kept = {
-            pd.user_id
-            for pd in trip.potential_drivers
-            if keep_user_id is not None
-            and pd.user_id == keep_user_id
-            and pd.status is Status.pending
-        }
-        riders = [
-            r
-            for r in trip.riders
-            if r.user_id is None or r.user_id in kept or rides(r.user_id, trip)
-        ]
-        if not was_driven(trip) and len(riders) != len(trip.riders):
-            trip.riders = riders
-            await session.flush()
-        gone = [
-            pd
-            for pd in trip.potential_drivers
-            if pd.status is Status.pending
-            and pd.user_id not in kept
-            and not rides(pd.user_id, trip)
-        ]
-        if not gone:
-            continue
-        for pd in gone:
-            trip.potential_drivers.remove(pd)
-            await session.delete(pd)
+        else:
+            replace = trip.end_date >= today
+            await _reconcile_regular(session, trip, members[trip.duty], rooms, replace)
+
+
+async def _reconcile_regular(
+    session: AsyncSession,
+    trip: Trip,
+    members: dict[int, Member],
+    rooms: dict[int, str],
+    replace: bool,
+) -> None:
+    """Take whoever no longer rides off a regular `trip`, replacing them if `replace`."""
+    # Pending potential drivers who are still members keep their duty, also when away.
+    keep = {
+        pd.user_id
+        for pd in trip.potential_drivers
+        if pd.status is Status.pending and pd.user_id in members
+    }
+
+    def rides(user_id: int | None) -> bool:
+        member = members.get(user_id)
+        return member is not None and member.rides(trip.start_date, trip.end_date)
+
+    riders = [r for r in trip.riders if r.user_id is None or r.user_id in keep or rides(r.user_id)]
+    if not was_driven(trip) and len(riders) != len(trip.riders):
+        trip.riders = riders
         await session.flush()
+    gone = [
+        pd
+        for pd in trip.potential_drivers
+        if pd.status is Status.pending and pd.user_id not in keep
+    ]
+    if not gone:
+        return
+    for pd in gone:
+        trip.potential_drivers.remove(pd)
+        await session.delete(pd)
+    await session.flush()
+    if replace:
         await _add_potential_drivers(session, trip, len(gone), rooms)
 
 
@@ -328,6 +344,7 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
             select(PotentialDriver)
             .join(PotentialDriver.trip)
             .where(PotentialDriver.status == Status.pending)
+            .order_by(PotentialDriver.id)
             .options(selectinload(PotentialDriver.trip))
             # Waits for a duty being marked right now (`get_potential_driver` locks it too);
             # Postgres then checks the status again, so it isn't struck after being marked.
@@ -338,11 +355,11 @@ async def process_overdue(session: AsyncSession, now: datetime) -> list[Potentia
     for pd in missed:
         pd.status = Status.missed
         if pd.user_id is not None:
-            label = pd.trip.duty.label
+            what = f"{pd.trip.duty.label} on {long_date(pd.trip.start_date)}"
             await strikes.issue(
                 session,
                 user_id=pd.user_id,
-                reason=f"{label} on {long_date(pd.trip.start_date)} not marked as done",
+                reason=f"{what} not marked as done",
                 auto=True,
                 potential_driver_id=pd.id,
                 today=now.date(),
@@ -360,15 +377,20 @@ async def get_potential_driver(session: AsyncSession, potential_driver_id: int) 
     Raises:
         DutyError: if there is no such potential driver.
     """
-    trip_id = await session.scalar(
-        select(PotentialDriver.trip_id).where(PotentialDriver.id == potential_driver_id)
-    )
+    trip_id = None
+    if 0 < potential_driver_id <= MAX_ID:
+        trip_id = await session.scalar(
+            select(PotentialDriver.trip_id).where(PotentialDriver.id == potential_driver_id)
+        )
     if trip_id is None:
         raise DutyError("Duty not found")
     # Locked before they are loaded, so a request's (fresh) session reads them as they are
     # after the other transaction finished.
     await session.execute(
-        select(PotentialDriver.id).where(PotentialDriver.trip_id == trip_id).with_for_update()
+        select(PotentialDriver.id)
+        .where(PotentialDriver.trip_id == trip_id)
+        .order_by(PotentialDriver.id)
+        .with_for_update()
     )
     pd = await session.scalar(
         select(PotentialDriver)
@@ -388,10 +410,9 @@ def can_mark_as_driver(pd: PotentialDriver, actor: User, now: datetime) -> bool:
     """Whether `actor` may mark `pd` as the trip's driver now.
 
     Residents: only their own open duty, from its first day until the deadline.
-    floor speaker: any duty at any time, as long as nobody has driven the trip.
+    The floor speaker: any duty at any time, as long as nobody has driven the trip.
     """
-    # Only one person drives a trip: once somebody drove it, it's closed.
-    if any(x.status is Status.drove for x in pd.trip.potential_drivers):
+    if pd.trip.driver is not None:
         return False
     if actor.is_admin:
         return True
@@ -438,10 +459,6 @@ async def mark_as_driver(
             await _revoke_strikes(session, other, now)
             other.status = Status.rode
     await session.flush()
-
-
-# How long a "Done" can be taken back (a mis-tap), see `undo_driver`.
-UNDO_MINUTES = 10
 
 
 def can_undo(pd: PotentialDriver, actor: User, now: datetime) -> bool:
@@ -502,8 +519,10 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
 async def keep_missed(
     session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime
 ) -> None:
-    """Admin only: a missed duty stays missed and its strike stays; it just no longer needs
-    the floor speaker's attention. It can still be marked done or excused later.
+    """Admin only: a missed duty stays missed and its strike stays.
+
+    It no longer needs the floor speaker's attention, and can still be marked done or
+    excused later.
 
     Raises:
         DutyError: if `actor` isn't the floor speaker or the duty isn't missed.
@@ -517,9 +536,9 @@ async def keep_missed(
 
 
 async def dispute(session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime) -> None:
-    """Admin only: marked as driven but not actually done. The driver gets a strike.
+    """Admin only: marked as done but not actually done.
 
-    The driver loses the drive; the others stay "rode" and get nothing.
+    The driver loses the drive and gets a strike; the others stay "rode" and get nothing.
 
     Raises:
         DutyError: if `actor` isn't the floor speaker or `pd` didn't drive.
@@ -575,80 +594,88 @@ async def preview(
 ) -> Preview:
     """Expected potential drivers for the trips starting between `start` and `end`.
 
-    Trips that already exist (e.g. penalty weeks) are shown as they are; the others are
-    simulated with `carpool.plan`, once per pending potential driver of the open trip, as
-    if that one drove it (`carpool.assume_driven`). Older trips nobody has driven yet (e.g.
-    yesterday's before the deadline) count as `load_balances` has them: their potential
-    drivers keep their share reserved, as when the real trips are chosen.
-
-    The dishwasher heroes of `today`'s month are left out of its kitchen trips. Next
-    month's aren't known yet (its count is still running), so it is planned without any.
+    Trips that already exist (e.g. penalty weeks) are shown as they are, the others are
+    simulated with `carpool.plan`. The dishwasher heroes of `today`'s month are left out
+    of its kitchen trips; next month's aren't known yet, so it is planned without any.
     """
-    n = potential_drivers_per_trip(duty)
-    step = timedelta(days=1 if duty is Duty.kitchen else 7)
-    # Trash weeks start on Monday: skip the week that is already running on `start`.
-    first, _ = trip_bounds(duty, start)
-    if first < start:
-        first += step
-
+    bounds = _trip_bounds_between(duty, start, end)
     existing = {
         t.start_date: t
         for t in await session.scalars(
             select(Trip)
-            .where(Trip.duty == duty, Trip.start_date >= first, Trip.start_date <= end)
+            .where(Trip.duty == duty, Trip.start_date >= start, Trip.start_date <= end)
             .options(selectinload(Trip.potential_drivers))
         )
     }
+    todo = [b for b in bounds if b[0] not in existing]
+    open_trip = await _open_trip(session, duty, start)
+    scenarios = _scenarios(await load_balances(session, duty), open_trip)
+    members = await load_members(session, duty, today)
+
+    plans = {}
+    for driver, balances in scenarios.items():
+        # One list of potential drivers per `todo` trip, in the same order.
+        planned = iter(carpool.plan(balances, members, todo, potential_drivers_per_trip(duty)))
+        entries = []
+        for b in bounds:
+            if (trip := existing.get(b[0])) is not None:
+                drivers = [pd.user_id for pd in trip.potential_drivers if pd.user_id is not None]
+                entries.append(PreviewEntry(*b, drivers, trip.is_penalty))
+            else:
+                entries.append(PreviewEntry(*b, next(planned)))
+        plans[driver] = entries
+    return Preview(None if None in scenarios else open_trip.start_date, plans)
+
+
+def _trip_bounds_between(duty: Duty, start: date, end: date) -> list[tuple[date, date]]:
+    """The bounds of `duty`'s trips that start between `start` and `end`."""
+    step = timedelta(days=1 if duty is Duty.kitchen else 7)
+    day, _ = trip_bounds(duty, start)
+    if day < start:  # the trash week already running on `start`
+        day += step
     bounds = []
-    day = first
     while day <= end:
         bounds.append(trip_bounds(duty, day))
         day += step
-    todo = [b for b in bounds if b[0] not in existing]
+    return bounds
 
-    # The open trip: the latest regular one before the window that nobody has driven yet.
+
+async def _open_trip(session: AsyncSession, duty: Duty, before: date) -> Trip | None:
+    """The latest regular trip starting before `before` that nobody has driven yet."""
     earlier = await session.scalars(
         select(Trip)
         .where(
             Trip.duty == duty,
             Trip.is_penalty.is_(False),
-            Trip.start_date < first,
+            Trip.start_date < before,
             Trip.potential_drivers.any(PotentialDriver.status == Status.pending),
         )
         .order_by(Trip.start_date.desc())
         .options(selectinload(Trip.potential_drivers), selectinload(Trip.riders))
     )
-    open_trip = next((t for t in earlier if not was_driven(t)), None)
-    pending = (
-        [pd for pd in open_trip.potential_drivers if pd.status is Status.pending and pd.user_id]
-        if open_trip
-        else []
-    )
+    return next((t for t in earlier if not was_driven(t)), None)
 
-    balances = await load_balances(session, duty)
-    members = await load_members(session, duty, today)
-    scenarios: dict[int | None, dict[int, Balance]] = {None: balances}
-    if pending:
-        riders = [r.user_id for r in open_trip.riders]
-        released = {pd.user_id: pending_share(open_trip, pd) for pd in pending}
-        scenarios = {
-            pd.user_id: carpool.assume_driven(
-                balances, riders, released, pd.user_id, open_trip.start_date
-            )
-            for pd in pending
-        }
 
-    plans = {}
-    for driver, scenario in scenarios.items():
-        # plan() returns one list of potential drivers per `todo` trip, in the same order.
-        planned = iter(carpool.plan(scenario, members, todo, n))
-        entries = []
-        for b in bounds:
-            if b[0] in existing:
-                t = existing[b[0]]
-                drivers = [pd.user_id for pd in t.potential_drivers if pd.user_id]
-                entries.append(PreviewEntry(*b, drivers, t.is_penalty))
-            else:
-                entries.append(PreviewEntry(*b, next(planned)))
-        plans[driver] = entries
-    return Preview(open_trip.start_date if pending else None, plans)
+def _scenarios(
+    balances: dict[int, Balance], open_trip: Trip | None
+) -> dict[int | None, dict[int, Balance]]:
+    """The balances as if each pending potential driver of `open_trip` drove it.
+
+    Without one, just `balances` under None. Older trips nobody has driven yet keep their
+    shares reserved, as when the real trips are chosen.
+    """
+    pending = [
+        pd
+        for pd in (open_trip.potential_drivers if open_trip else [])
+        if pd.status is Status.pending and pd.user_id is not None
+    ]
+    if not pending:
+        return {None: balances}
+    riders = [r.user_id for r in open_trip.riders]
+    released = {pd.user_id: reserved_share(open_trip, pd) for pd in pending}
+    return {
+        pd.user_id: carpool.assume_driven(
+            balances, riders, released, pd.user_id, open_trip.start_date
+        )
+        for pd in pending
+    }

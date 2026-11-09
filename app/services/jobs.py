@@ -1,8 +1,4 @@
-"""The daily job: flag missed duties and choose the potential drivers for today and this week.
-
-Today's (and on Monday the week's) potential drivers are only chosen from the deadline hour
-on (`duties.choose_at`), right after the previous duty's deadline.
-"""
+"""The daily job: flag missed duties and choose the potential drivers for today and this week."""
 
 import logging
 from datetime import datetime
@@ -10,8 +6,8 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import SessionLocal
-from app.models import Duty
+from app.db import Lock, SessionLocal, advisory_lock
+from app.models import Duty, Trip
 from app.services import duties
 
 log = logging.getLogger(__name__)
@@ -20,20 +16,25 @@ log = logging.getLogger(__name__)
 async def daily_tick(session: AsyncSession, now: datetime) -> None:
     """Strike overdue duties, then make sure today's and this week's trips have potential drivers.
 
-    Before the deadline hour the new day's (week's) trip isn't chosen yet: the previous one
-    can still be marked until then. Safe to run any number of times; it also commits. Runs
-    on a schedule, on startup, from the admin page, and from the dashboard if the current
-    trips are missing.
+    A day's (week's) trip is only chosen from the deadline hour on (`duties.choose_at`).
+    Safe to run any number of times; it also commits.
     """
-    # Serialize ticks (scheduler, startup and page loads may race).
-    await duties.lock_trips(session)
+    await advisory_lock(session, Lock.trips)
     missed = await duties.process_overdue(session, now)
-    for duty in Duty:
-        if now >= duties.choose_at(duty, now.date()):
-            await duties.materialize(session, duty, now.date())
+    await duties.fill_current(session, now)
     await session.commit()
     if missed:
         log.info("Marked %d potential drivers as missed", len(missed))
+
+
+async def current_trips(session: AsyncSession, now: datetime) -> dict[Duty, Trip | None]:
+    """Each duty's `duties.current_trip`; runs the daily job first if one is missing (e.g.
+    the server was down at the deadline hour)."""
+    trips = {duty: await duties.current_trip(session, duty, now) for duty in Duty}
+    if None in trips.values():
+        await daily_tick(session, now)
+        trips = {duty: await duties.current_trip(session, duty, now) for duty in Duty}
+    return trips
 
 
 async def scheduled_tick() -> None:

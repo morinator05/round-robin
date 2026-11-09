@@ -16,11 +16,11 @@ uv sync
 uv run alembic upgrade head
 uv run fastapi dev app/main.py              # dev server with reload, http://localhost:8000
 uv run pytest                               # DB tests are skipped if Postgres is down
-uv run pytest tests/test_rules.py::test_tick_assigns_kitchen_and_trash   # one test
+uv run pytest tests/test_duties.py::test_daily_tick_and_deadlines   # one test
 uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
-uv run python scripts/seed.py [--days 30]   # test residents (+ a simulated month on an empty DB)
-uv run python scripts/create_admin.py       # first floor speaker (admin) account
+uv run python -m scripts.seed [--days 30]  # test residents (+ a simulated month on an empty DB)
+uv run python -m scripts.create_admin      # first floor speaker (admin) account
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff and pytest against Postgres 16. With `CI` set, an
@@ -78,30 +78,40 @@ deleted, so a hero month never changes once it runs.
 drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they
 still count for the share size but their share is dropped, not passed on to others.
 
-**The daily job.** `jobs.daily_tick` takes a Postgres advisory lock, marks overdue
+**The daily job.** `jobs.daily_tick` takes the trips advisory lock, marks overdue
 potential drivers missed and issues strikes (`duties.process_overdue`), then materializes
 today's trips, and commits. A day's (on Monday the week's) trip is only materialized from
 `duties.choose_at` on: the deadline hour of its first day, right after the previous trip's
 deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
 Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
 startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
-the dashboard when the current trips are missing, so it must stay idempotent. Absences, pausing and deleting users call
-`duties.reconcile`, which removes them as riders and pending potential drivers of
-current/upcoming trips and chooses replacements.
+the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay
+idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
+every trip still open (yesterday's too, until its deadline): whoever no longer rides stops
+being a rider of undriven trips; paused and deleted pending potential drivers are replaced,
+but on a trip whose days are over only removed (nobody new gets a past duty, and
+`fill_current` never tops one up). Away pending potential drivers keep their duty. Deleting
+an absence or resuming someone makes them a rider again (`duties.add_riders`).
 
 **Layers.**
 - `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
-  They raise `DutyError` / `UserError` with an English, user-facing message.
-- `app/web.py`: all routes. They parse input, call a service, commit, and turn the
-  service errors into a session flash. Every POST answers with a 303 redirect. htmx
-  requests are detected via the `HX-Request` header. New routes go on `router`, which
-  requires a login for every route; only login/logout are on `public`. Nothing with
-  personal data may be visible without a login (`test_every_page_needs_a_login`).
+  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, all in
+  `services/errors.py`) with an English, user-facing message. Advisory locks:
+  `db.advisory_lock(session, Lock.trips)`.
+- `app/web/`: the routes, one module per page (`login`, `dashboard`, `profile`, `pages`,
+  `admin`); `common.py` has the template setup and helpers. Routes parse input and run
+  their service calls through `common.act(request, session, action, to)`, which commits,
+  turns a `ServiceError` into a flash message (rolled back) and answers with a 303
+  redirect; dashboard cards (`?card=1`, htmx) get `HX-Refresh` on errors instead. Row ids
+  from paths and forms: `get_or_404`, `parse_id`. New routes go on the one shared
+  `router`, which requires a login for every route; only login/logout are on `public`.
+  Nothing with personal data may be visible without a login
+  (`test_every_route_needs_a_login`).
 - `app/deps.py`: `Session`, `OptionalUser`, `CurrentUser`, `AdminUser` are `Annotated`
   route parameter types; `CurrentUser` raises `LoginRequired`, which `main.py` turns into a
   redirect to `/login`. A session counts only if it carries the user's current
   `User.session_token`; `auth.end_sessions` (logout, password changes) sets a new one and so
-  logs the user out everywhere. Log in with `web.start_session`.
+  logs the user out everywhere. Log in with `common.start_session`.
 - `app/formatting.py`: how dates are written (`short_date` "3 Nov", `long_date`
   "3 Nov 2026"), for templates and strike reasons.
 - `app/config.py`: settings from `.env`. Use `settings.now()` / `settings.today()` (in the
@@ -114,9 +124,19 @@ current/upcoming trips and chooses replacements.
   the `public` schema and recreates all tables per test from `Base.metadata` (not via
   migrations), disables the scheduler, and monkeypatches `app.db.SessionLocal`. Use the
   `session` fixture.
-- `tests/test_carpool.py`: the pure fairness logic. `tests/test_rules.py`: rules against
-  the DB, using `make_users` and `at(day, hour)` with a fixed `MONDAY`. Web pages are
-  tested through `httpx.AsyncClient(transport=httpx.ASGITransport(app=app))`.
+- At most 50 test functions: extend a scenario test (or its parametrize) rather than add
+  a new one. `test_carpool.py` is the pure fairness logic; `test_duties.py`,
+  `test_strikes.py`, `test_dishwasher.py`, `test_users.py` the rules against the DB;
+  `test_auth.py` logins and security; `test_pages.py` what the pages say.
+- `tests/helpers.py`: fixed dates (`MONDAY`, `WEDNESDAY`, …), `at(day, hour)`,
+  `make_users`, `kitchen_pair`, `give_strikes`, `reload_trip`, `plans`, and for pages
+  `words` (the visible text: assert on that, not on markup), `section`, `follow`.
+- Pages: the `browser` fixture opens logged-in clients (`await browser("p2")`) on the app
+  through `httpx.ASGITransport`; `client` is one that isn't logged in. Both pin the app's
+  clock with the `clock` fixture (Wednesday noon; `clock.set(day, hour)`), so no test
+  depends on the real date. `throttles(ip=3)` lowers the login limits.
+- The app commits in its own sessions: after a request, reload with `reload_trip` or
+  `session.expire_all()` before reading what it changed.
 - pytest runs with `asyncio_mode = "auto"`, so async tests need no marker.
 
 ## Conventions

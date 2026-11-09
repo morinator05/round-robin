@@ -1,31 +1,30 @@
 {# The dishwasher on the dashboard, built like a duty card: the logged-in user's row with the
-   button or their state, and one line below. Expects `dishwasher` (see `web.dishwasher_ctx`).
+   button or their state, and one line below. Expects `dishwasher` (`dashboard.dishwasher_ctx`).
    The button posts via htmx and gets the dashboard back; it takes this card from it. #}
-{% set d = dishwasher %}
 <section class="card duty" id="card-dishwasher">
-  <h2>Dishwasher <span class="muted">{{ d.month|month_name }}</span></h2>
+  <h2>Dishwasher <span class="muted">{{ dishwasher.month|month_name }}</span></h2>
   <div class="person">
     <div class="name">{{ person(user) }}</div>
-    {% if d.state == "can_mark" %}
+    {% if dishwasher.state == "can_mark" %}
       <button class="primary" hx-post="/dishwasher?card=1" hx-target="#card-dishwasher"
               hx-select="#card-dishwasher" hx-swap="outerHTML">I emptied it</button>
-    {% elif d.state in ("done", "not_needed") %}
+    {% elif dishwasher.state in ("done", "not_needed") %}
       {# Just emptied (by you or someone else): when it can be marked again, as a plain
          label rather than a greyed-out button that looks almost like the real one. #}
-      <span class="badge">Again from {{ d.next_allowed|clock }}</span>
+      <span class="badge">Again from {{ dishwasher.next_allowed|clock }}</span>
     {% else %}
       <span class="badge">inactive</span>
     {% endif %}
   </div>
   <p class="muted foot">
-    {% if d.last %}Last emptied by {% if d.last.user_id == user.id %}you{% else %}{{ person(d.last.user) }}{% endif %}
-      {% if (d.last.cleared_at|local_date) == today %}today at {{ d.last.cleared_at|clock }}{% else %}on {{ d.last.cleared_at|date_time }}{% endif %}
-      {%- if d.can_undo %} ·
-        <button class="link" hx-post="/dishwasher/{{ d.last.id }}/undo?card=1" hx-target="#card-dishwasher"
+    {% if dishwasher.last %}Last emptied by {% if dishwasher.last.user_id == user.id %}you{% else %}{{ person(dishwasher.last.user) }}{% endif %}
+      {% if (dishwasher.last.cleared_at|local_date) == today %}today at {{ dishwasher.last.cleared_at|clock }}{% else %}on {{ dishwasher.last.cleared_at|date_time }}{% endif %}
+      {%- if dishwasher.can_undo %} ·
+        <button class="link" hx-post="/dishwasher/{{ dishwasher.last.id }}/undo?card=1" hx-target="#card-dishwasher"
                 hx-select="#card-dishwasher" hx-swap="outerHTML">Undo</button>
       {%- else %}.{% endif %}
     {%- else %}Nobody has emptied it yet.{% endif %}
-    {% if d.mine %}You emptied it {{ "once" if d.mine == 1 else d.mine ~ " times" }} this month.
-    {%- elif d.state != "inactive" %}Optional: the {{ dishwasher_heroes }} who empty it most get next month off kitchen duty.{% endif %}
+    {% if dishwasher.mine %}You emptied it {{ dishwasher.mine|times }} this month.
+    {%- elif dishwasher.state != "inactive" %}Optional: the {{ dishwasher_heroes }} who empty it most get next month off kitchen duty.{% endif %}
   </p>
 </section>

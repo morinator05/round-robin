@@ -1,14 +1,12 @@
-"""Create the first floor speaker account: uv run python scripts/create_admin.py"""
+"""Create the first floor speaker account: uv run python -m scripts.create_admin"""
 
 import asyncio
 import getpass
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from app.db import SessionLocal  # noqa: E402
-from app.services import users  # noqa: E402
+from app.config import settings
+from app.db import SessionLocal
+from app.services import duties, users
 
 
 async def main() -> None:
@@ -28,8 +26,11 @@ async def main() -> None:
             )
         except users.UserError as e:
             sys.exit(str(e))
+        # Like adding a resident on the admin page: on today's duties if people are missing.
+        await duties.fill_current(session, settings.now())
         await session.commit()
         print(f"Floor speaker {user.name} (@{user.username}) created.")
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

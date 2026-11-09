@@ -1,8 +1,7 @@
-"""Request dependencies for the routes: database session and the logged-in user.
+"""Request dependencies for the routes: the database session and the logged-in user.
 
-FastAPI resolves these per request, similar to constructor injection. A route parameter
-`user: AdminUser` loads the logged-in user and also checks that they are the floor speaker,
-before the route body runs.
+A route parameter `user: AdminUser` loads the logged-in user and checks that they are the
+floor speaker before the route body runs.
 """
 
 import hmac

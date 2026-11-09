@@ -1,8 +1,8 @@
 """Seed the database with test residents, optionally with a simulated history.
 
-    uv run python scripts/seed.py                  # 10 residents
-    uv run python scripts/seed.py -n 20 --password test1234
-    uv run python scripts/seed.py --days 30        # plus a simulated month of duties
+    uv run python -m scripts.seed                  # 10 residents
+    uv run python -m scripts.seed -n 20 --password test1234
+    uv run python -m scripts.seed --days 30        # plus a simulated month of duties
 
 Usernames are the lowercase names; existing usernames are skipped, so it is
 safe to run more than once. Current trips that nobody has driven yet get their
@@ -22,18 +22,15 @@ import asyncio
 import random
 import sys
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from sqlalchemy import delete, func, select, update  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
-from sqlalchemy.orm import selectinload  # noqa: E402
-
-from app.config import settings  # noqa: E402
-from app.db import SessionLocal  # noqa: E402
-from app.models import Duty, PotentialDriver, Status, Strike, Trip, User  # noqa: E402
-from app.services import dishwasher, duties, jobs, users  # noqa: E402
+from app.config import settings
+from app.db import SessionLocal
+from app.models import Duty, PotentialDriver, Status, Strike, Trip, User
+from app.services import dishwasher, duties, jobs, users
 
 # fmt: off
 # Star Trek (TOS and TNG) nicknames, so no test resident shares a real resident's name
@@ -83,8 +80,7 @@ async def tick(session: AsyncSession, now: datetime) -> None:
 async def mark(session: AsyncSession, potential_driver_id: int, now: datetime) -> None:
     """The potential driver marks that they drove at `now`, if nobody has driven yet."""
     pd = await duties.get_potential_driver(session, potential_driver_id)
-    driven = any(x.status is Status.drove for x in pd.trip.potential_drivers)
-    if pd.status is not Status.pending or driven:
+    if pd.status is not Status.pending or pd.trip.driver is not None:
         return
     actor = await session.get(User, pd.user_id)
     await duties.mark_as_driver(session, pd, actor, now)
@@ -133,10 +129,11 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     keen = [rng.choice([0.2, 1, 1, 3]) for _ in residents]
 
     # A few absences, one of them usually around today.
-    for u in rng.sample([u for u in residents if not u.is_admin], k=min(3, len(residents) - 1)):
+    non_admins = [u for u in residents if not u.is_admin]
+    for u in rng.sample(non_admins, k=min(3, len(non_admins))):
         away_start = start + timedelta(days=rng.randrange(days + 4))
         away_end = away_start + timedelta(days=rng.randrange(4, 10))
-        await users.add_away(session, u, away_start, away_end, start)
+        await users.add_away(session, u, away_start, away_end, at(start, 0))
     await session.commit()
 
     late: dict[date, list[int]] = {}
@@ -220,7 +217,7 @@ async def main(count: int, password: str, days: int, seed: int | None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("-n", "--count", type=int, default=10)
-    parser.add_argument("--password", default="passwort123")
+    parser.add_argument("--password", default="password123")
     parser.add_argument("--days", type=int, default=0, help="simulate this many past days")
     parser.add_argument("--random-seed", type=int, help="same number, same history")
     args = parser.parse_args()

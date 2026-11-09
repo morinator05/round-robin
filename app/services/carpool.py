@@ -33,10 +33,6 @@ Display: scores are exact fractions, but the statistics page shows them as whole
 `POINTS_PER_DUTY` per duty, rounded by the largest-remainder method so the shown points
 still sum to exactly what the scores sum to (see `display_points`).
 
-The preview can't know which potential driver of the open trip (today's, nobody drove it
-yet) will drive it, so it simulates one plan per potential driver, each as if that one
-drove (see `assume_driven`).
-
 Everything in here is pure (no database) so it can be tested and simulated cheaply.
 """
 
@@ -92,11 +88,13 @@ class Member:
     away: tuple[tuple[date, date], ...] = ()
 
     def rides(self, start: date, end: date) -> bool:
-        """True if the member rides on a trip from `start` to `end` (both included).
+        """True if no away period overlaps the days `start` to `end` (both included)."""
+        return not overlaps(self.away, start, end)
 
-        That is, no away period overlaps those days.
-        """
-        return not any(a_start <= end and start <= a_end for a_start, a_end in self.away)
+
+def overlaps(periods: Iterable[tuple[date, date]], start: date, end: date) -> bool:
+    """Whether any of `periods` (both ends included) shares a day with `start`..`end`."""
+    return any(p_start <= end and start <= p_end for p_start, p_end in periods)
 
 
 def week_start(d: date) -> date:

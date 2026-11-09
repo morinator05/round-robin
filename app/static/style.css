@@ -81,15 +81,15 @@ h2 .muted { font-weight: 400; margin-left: .35rem; }
 .strikes { font-weight: 700; }
 .strikes.ok { color: var(--ok); } .strikes.warn { color: var(--warn); } .strikes.bad { color: var(--bad); }
 
-/* --- Navigation: the current page is highlighted in white. */
+/* --- Navigation: the current page is highlighted. */
 nav { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem 1.25rem;
       padding: .5rem 1rem; background: var(--nav-bg); border-bottom: 1px solid var(--border-strong); }
 nav a { color: var(--accent-strong); text-decoration: none; }
 nav .brand { font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
 .brand-floor { color: var(--me); }
 .nav-links { display: flex; flex-wrap: wrap; gap: .2rem; }
-.nav-links a, .nav-user > a { padding: .35rem .7rem .25rem; }
-.nav-links a:hover, .nav-user > a:hover { background: var(--nav-hover); }
+.nav-links a { padding: .35rem .7rem .25rem; }
+.nav-links a:hover { background: var(--nav-hover); }
 nav a[aria-current="page"], nav a[aria-current="page"]:hover {
   font-weight: 700; background: var(--nav-active); box-shadow: 0 1px 2px rgba(31, 63, 115, .1); }
 .nav-user { display: flex; align-items: center; gap: .4rem; margin-left: auto; font-size: .95rem; }
@@ -175,10 +175,9 @@ h1.date { font-variant-numeric: tabular-nums; }
 .plan-switch a[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent-line);
                                       color: var(--accent-strong); font-weight: 700;
                                       box-shadow: none; }
-.plan-switch .room { box-shadow: none; }
 /* The room inside a choice: just the number, in the link's own colour. */
 .plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none;
-                     vertical-align: baseline; }
+                     box-shadow: none; vertical-align: baseline; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
@@ -217,9 +216,6 @@ button:active { transform: translateY(1px); box-shadow: none; }
 /* The one thing to do on a card ("Done", "I emptied it"): solid. */
 button.primary { background: var(--accent); color: var(--card); border-color: var(--accent); }
 button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
-button:disabled, button:disabled:hover { opacity: .45; cursor: default; transform: none;
-                                         box-shadow: none; }
-button.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
 button.secondary { background: var(--card); color: var(--accent); border-color: var(--accent-line); }
 button.secondary:hover { background: var(--card-alt); border-color: var(--accent); }
 button.danger { background: var(--card); color: var(--bad); border-color: var(--bad-line); }
@@ -322,12 +318,12 @@ table.trips tbody.trip td { border-bottom: 0; }
 table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
 table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
 table.trips tbody.trip > tr + tr > td { padding-top: .15rem; }
-/* All cells of a line share the text baseline, so the date (a rowspan cell aligns with its
-   first line) starts level with the first resident, also when a penalty week says so on a
+/* All cells of a line share the text baseline, so the date (a cell over all of a trip's
+   lines aligns with its first one) starts level with the first resident, also when a penalty week says so on a
    second line. An invisible strut as high as a button gives every line the same height,
    with buttons or without. */
 table.trips td { vertical-align: baseline; }
-table.trips td[rowspan] { white-space: normal; }
+table.trips td.trip-date { white-space: normal; }
 table.trips td.end::after { content: "\200b"; display: inline-block; width: 0; font-size: .9rem;
                             line-height: 1.5; padding: .4rem 0 .3rem;
                             border: solid transparent; border-width: 1px 0; }
@@ -359,12 +355,12 @@ tr.muted td.end button:hover { background: var(--nav-hover); }
 .card .table-wrap + .actions { margin-top: 1rem; }
 
 /* --- Messages after an action. */
-.flash { padding: .65rem 1rem .55rem; margin-bottom: .75rem;
-         color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
-.flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
 /* The message stays in view when the page scrolls back to the section that was changed
    (admin page); a success message fades after a few seconds, an error stays. */
-.flash { position: sticky; top: .5rem; z-index: 5; box-shadow: var(--shadow); }
+.flash { padding: .65rem 1rem .55rem; margin-bottom: .75rem; position: sticky; top: .5rem;
+         z-index: 5; box-shadow: var(--shadow);
+         color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
+.flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
 .flash.ok { animation: flash-out .4s ease-in 5s forwards; }
 @keyframes flash-out { to { opacity: 0; visibility: hidden; } }
 /* Admin: the message sits in the sticky jump bar, under the links, across its width; a
@@ -379,11 +375,10 @@ tr.muted td.end button:hover { background: var(--nav-hover); }
 /* --- "?" after a heading: a small square link to that topic on the help page. */
 .help-link { display: inline-grid; place-content: center; width: 1.4em; height: 1.4em;
              margin-left: .35rem; vertical-align: .15em; font-size: .72rem; font-weight: 800;
-             text-decoration: none; color: var(--accent-strong);
+             text-decoration: none; color: var(--accent-strong); position: relative;
              background: var(--accent-soft); border: 1px solid var(--accent-line); }
 .help-link:hover { border-color: var(--accent); }
 /* A bigger area to tap than it looks. */
-.help-link { position: relative; }
 .help-link::after { content: ""; position: absolute; inset: -6px; }
 /* Help page: one card per topic, lines kept readable. */
 .card.help { margin-top: 1.25rem; }
@@ -404,12 +399,6 @@ ul.near a { margin-left: .35rem; }
 /* "Full name · @username" after a resident's name: the dot with even room on both sides
    (Overpass draws it right of centre, so the right margin is larger). */
 .sep { margin: 0 .55em 0 .3em; }
-/* On a phone: small chips in two rows, so all six links show and the sticky bar stays
-   low; the counts as bare numbers. */
-@media (max-width: 600px) {
-  .jump { gap: .3rem; padding: .4rem 0; }
-  .jump a { padding: .25rem .5rem .15rem; font-size: .8rem; }
-}
 /* Sections scrolled into view (jump bar, after an action) stop below the sticky bar and
    the message in it. */
 main > section[id] { scroll-margin-top: 8rem; }
@@ -499,7 +488,7 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   /* The cells' own lines from the wide table don't belong in the stacked one. */
   table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 0; }
   /* Duties: the date heads the trip; per resident the name and status, buttons below. */
-  table.trips td[rowspan] { grid-column: 1 / -1; padding: 0; font-weight: 600; }
+  table.trips td.trip-date { grid-column: 1 / -1; padding: 0; font-weight: 600; }
   table.trips td.end { grid-column: 1 / -1; text-align: right; }
   /* Stacked rows light up as a whole (a tap leaves them "hovered"), not cell by cell. */
   table.trips tbody.trip:hover td, table.strike-list tr:hover > td,
@@ -519,7 +508,10 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
      button across the width, like the away forms. */
   .panel form.row { grid-template-columns: 2fr 1fr; }
   .panel form.row > :nth-child(n+3) { grid-column: 1 / -1; }
-  /* The jump bar has two rows here, plus the message. */
+  /* Admin jump bar: small chips in two rows, so all six links show and the sticky bar
+     stays low; it has two rows here, plus the message. */
+  .jump { gap: .3rem; padding: .4rem 0; }
+  .jump a { padding: .25rem .5rem .15rem; font-size: .8rem; }
   main > section[id] { scroll-margin-top: 10rem; }
   /* Away forms and "Give strike": one field under the other, the button across the whole
      card below them. */
