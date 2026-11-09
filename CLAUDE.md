@@ -78,7 +78,7 @@ deleted, so a hero month never changes once it runs.
 drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they
 still count for the share size but their share is dropped, not passed on to others.
 
-**The daily job.** `jobs.daily_tick` takes a Postgres advisory lock, marks overdue
+**The daily job.** `jobs.daily_tick` takes the trips advisory lock, marks overdue
 potential drivers missed and issues strikes (`duties.process_overdue`), then materializes
 today's trips, and commits. A day's (on Monday the week's) trip is only materialized from
 `duties.choose_at` on: the deadline hour of its first day, right after the previous trip's
@@ -91,7 +91,9 @@ current/upcoming trips and chooses replacements.
 
 **Layers.**
 - `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
-  They raise `DutyError` / `UserError` with an English, user-facing message.
+  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, all in
+  `services/errors.py`) with an English, user-facing message. Advisory locks:
+  `db.advisory_lock(session, Lock.trips)`.
 - `app/web.py`: all routes. They parse input, call a service, commit, and turn the
   service errors into a session flash. Every POST answers with a 303 redirect. htmx
   requests are detected via the `HX-Request` header. New routes go on `router`, which

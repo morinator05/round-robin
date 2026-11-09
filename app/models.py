@@ -22,6 +22,11 @@ class Base(DeclarativeBase):
     """Base class of all tables."""
 
 
+# Column sizes, checked before saving (`services/users`).
+MAX_NAME_LENGTH = 100
+MAX_USERNAME_LENGTH = 50
+
+
 def new_session_token() -> str:
     """A random value for `User.session_token`."""
     return secrets.token_urlsafe(32)
@@ -73,9 +78,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100))
+    name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     room_number: Mapped[str] = mapped_column(String(20))
-    username: Mapped[str] = mapped_column(String(50), unique=True)
+    username: Mapped[str] = mapped_column(String(MAX_USERNAME_LENGTH), unique=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     # Also in the session cookie; a cookie only counts if it matches. A new one (on logout
     # and password changes, `auth.end_sessions`) logs the user out on every device. A
@@ -104,10 +109,7 @@ class User(Base):
 
     @property
     def display_name(self) -> str:
-        """Plain-text form, e.g. "Picard (E101)", for messages and confirm dialogs.
-
-        In page content `person()` in `web.py` is used instead (name and room styled).
-        """
+        """Plain-text form, e.g. "Picard (E101)", for messages and confirm dialogs."""
         return f"{self.first_name} ({self.room_number})"
 
 
@@ -143,6 +145,11 @@ class Trip(Base):
     riders: Mapped[list["Rider"]] = relationship(
         back_populates="trip", cascade="all, delete-orphan"
     )
+
+    @property
+    def driver(self) -> "PotentialDriver | None":
+        """Whoever drove the trip (marked it done), if anyone has."""
+        return next((pd for pd in self.potential_drivers if pd.status is Status.drove), None)
 
 
 class Rider(Base):
@@ -226,9 +233,6 @@ class Strike(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="strikes", foreign_keys=[user_id])
-    potential_driver: Mapped[PotentialDriver | None] = relationship(
-        foreign_keys=[potential_driver_id]
-    )
     issued_by: Mapped[User | None] = relationship(foreign_keys=[issued_by_id])
 
     @property

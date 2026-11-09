@@ -83,8 +83,7 @@ async def tick(session: AsyncSession, now: datetime) -> None:
 async def mark(session: AsyncSession, potential_driver_id: int, now: datetime) -> None:
     """The potential driver marks that they drove at `now`, if nobody has driven yet."""
     pd = await duties.get_potential_driver(session, potential_driver_id)
-    driven = any(x.status is Status.drove for x in pd.trip.potential_drivers)
-    if pd.status is not Status.pending or driven:
+    if pd.status is not Status.pending or pd.trip.driver is not None:
         return
     actor = await session.get(User, pd.user_id)
     await duties.mark_as_driver(session, pd, actor, now)
@@ -136,7 +135,7 @@ async def simulate(session: AsyncSession, days: int, rng: random.Random) -> None
     for u in rng.sample([u for u in residents if not u.is_admin], k=min(3, len(residents) - 1)):
         away_start = start + timedelta(days=rng.randrange(days + 4))
         away_end = away_start + timedelta(days=rng.randrange(4, 10))
-        await users.add_away(session, u, away_start, away_end, start)
+        await users.add_away(session, u, away_start, away_end, at(start, 0))
     await session.commit()
 
     late: dict[date, list[int]] = {}

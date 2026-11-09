@@ -78,13 +78,11 @@ async def test_dashboard_for_those_on_duty_and_the_others(session, browser, cloc
     # After cleaning: thanks, also when you're on trash duty this week as well.
     await on_duty.post(f"/potential-drivers/{pair.first.id}/drove")
     assert "You did kitchen duty today – thanks!" in words(you((await on_duty.get("/")).text))
-    # Now the plan is known, the next kitchen duty says with whom. (The app changed the
-    # duty in its own session; this one forgets what it loaded before.)
-    by_id = {p.id: (p.username, p.room_number) for p in people}
-    session.expire_all()
+    # Now the plan is known, the next kitchen duty says with whom.
     me, partner = (await plans(session, clock.today))[None][0].potential_drivers
-    line = words(you((await (await browser(by_id[me][0])).get("/")).text))
-    assert f"with Person {by_id[partner][1]}" in line
+    by_id = {p.id: p for p in people}
+    line = words(you((await (await browser(by_id[me].username)).get("/")).text))
+    assert f"with Person {by_id[partner].room_number}" in line
 
     monkeypatch.setattr(settings, "preview_days", 0)
     assert (await free.get("/")).status_code == 200

@@ -51,10 +51,9 @@ async def test_penalty_week_follows_its_person(session):
     week = trip.start_date
 
     # Away in that week: it moves to the next free week.
-    await users.add_away(session, target, week, week + timedelta(days=2), MONDAY)
+    await users.add_away(session, target, week, week + timedelta(days=2), at(MONDAY))
     [trip] = await penalty_trips(session)
     assert trip.start_date == week + timedelta(days=7)
-    await session.refresh(target)  # `add_away` expired everything
 
     # Paused: no penalty week until they are back, and their strikes count again.
     await users.set_active(session, target, False, at(MONDAY, 12))

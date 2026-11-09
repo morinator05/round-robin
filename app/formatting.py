@@ -1,9 +1,11 @@
-"""How dates are written in the UI and in strike reasons ("3 Nov", "3 Nov 2026").
+"""How dates, times and numbers are written in the UI and in messages ("3 Nov", "14:32").
 
 `%a` and `%b` give English names because the app never changes the C locale.
 """
 
-from datetime import date
+from datetime import date, datetime
+
+from app.config import settings
 
 
 def short_date(d: date | None) -> str:
@@ -14,3 +16,36 @@ def short_date(d: date | None) -> str:
 def long_date(d: date | None) -> str:
     """Day, month and year: "3 Nov 2026"."""
     return f"{d.day} {d:%b %Y}" if d else ""
+
+
+def weekday(d: date) -> str:
+    """Short weekday name: "Tue"."""
+    return f"{d:%a}"
+
+
+def month_name(d: date) -> str:
+    """Month name: "November"."""
+    return f"{d:%B}"
+
+
+def clock(moment: datetime) -> str:
+    """The time of day like "14:32", in the configured time zone."""
+    return f"{moment.astimezone(settings.tz):%H:%M}"
+
+
+def local_date(moment: datetime) -> date:
+    """The date of `moment` in the configured time zone."""
+    return moment.astimezone(settings.tz).date()
+
+
+def date_time(moment: datetime | None) -> str:
+    """Date and time, "5 Nov 2026 21:30"; in a narrow column only the time wraps."""
+    if moment is None:
+        return ""
+    local = moment.astimezone(settings.tz)
+    return f"{long_date(local)} {local:%H:%M}".replace(" ", "\u00a0", 2)
+
+
+def signed(points: int) -> str:
+    """Points with their sign: "+37", "−112" (a real minus sign), "0"."""
+    return f"{points:+d}".replace("-", "\u2212") if points else "0"

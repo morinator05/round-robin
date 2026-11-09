@@ -8,7 +8,7 @@ from app.config import settings
 from app.models import User
 from app.services import users
 from app.services.users import UserError
-from tests.helpers import MONDAY, make_users
+from tests.helpers import MONDAY, at, make_users
 
 
 def test_resident_fields():
@@ -40,5 +40,5 @@ async def test_account_limits(session, monkeypatch):
     [resident] = await make_users(session, n=1, admin=False)
     far = MONDAY + timedelta(days=users.MAX_AWAY_DAYS_AHEAD + 1)
     with pytest.raises(UserError):
-        await users.add_away(session, resident, MONDAY, far, MONDAY)
-    await users.add_away(session, resident, MONDAY, far - timedelta(days=1), MONDAY)
+        await users.add_away(session, resident, MONDAY, far, at(MONDAY))
+    await users.add_away(session, resident, MONDAY, far - timedelta(days=1), at(MONDAY))

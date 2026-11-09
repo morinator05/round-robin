@@ -54,7 +54,7 @@
 {% set near = [] %}
 {% for u in users %}
   {% set n = active_strikes|selectattr("user_id", "equalto", u.id)|list|length %}
-  {% if n >= strike_threshold - 1 %}{% set _ = near.append((u, n)) %}{% endif %}
+  {% if near_penalty(n) %}{% set _ = near.append((u, n)) %}{% endif %}
 {% endfor %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 <div class="jump" role="navigation" aria-label="Sections">

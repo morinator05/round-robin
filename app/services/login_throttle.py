@@ -1,6 +1,6 @@
 """Slows down password guessing: too many failed logins block that login for a while.
 
-Two limits: per username and IP (`login_throttle`), and per username over all IPs
+Two limits: per username and IP (`ip_throttle`), and per username over all IPs
 (`account_throttle`, higher).
 
 The failures are kept in memory, so they are per process and reset on restart. That is
@@ -60,6 +60,10 @@ class LoginThrottle:
         """Forget all failures, after a successful login."""
         self._failures.pop(key, None)
 
+    def __len__(self) -> int:
+        """How many keys have recent failures."""
+        return len(self._failures)
+
     def _recent_failures(self, key: str) -> list[float]:
         """Failures inside the window; older ones are dropped so memory doesn't grow."""
         cutoff = self._clock() - self._window_seconds
@@ -72,7 +76,7 @@ class LoginThrottle:
 
 
 # Per username and IP.
-login_throttle = LoginThrottle()
+ip_throttle = LoginThrottle()
 # Per username from all IPs together, against guessing from many addresses. Higher, so an
 # attacker can't lock someone out as easily.
 ACCOUNT_MAX_FAILURES = 20

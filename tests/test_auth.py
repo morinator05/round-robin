@@ -40,7 +40,7 @@ async def one_of_everything(session, people, today) -> dict:
     """A row of each kind the routes take ids of, as their path parameters."""
     pair = await kitchen_pair(session, people, today)
     later = today + timedelta(days=30)
-    await users.add_away(session, people[1], later, later + timedelta(days=1), today)
+    await users.add_away(session, people[1], later, later + timedelta(days=1), at(today))
     away = await session.scalar(select(AwayPeriod))
     strike = await strikes.issue(session, user_id=people[2].id, reason="x", today=today)
     clear = await dishwasher.mark_cleared(session, people[3], at(today, 12))
@@ -292,7 +292,7 @@ async def test_login_attempts_are_limited(session, browser, throttles, monkeypat
 
     # Many guesses at once: each counts before its password check, not after it.
     checked = 0
-    authenticate = web.auth.authenticate
+    authenticate = auth.authenticate
 
     async def counting_authenticate(*args):
         nonlocal checked
@@ -300,7 +300,7 @@ async def test_login_attempts_are_limited(session, browser, throttles, monkeypat
         await asyncio.sleep(0.01)  # like the real check, let the other requests run meanwhile
         return await authenticate(*args)
 
-    monkeypatch.setattr(web.auth, "authenticate", counting_authenticate)
+    monkeypatch.setattr(auth, "authenticate", counting_authenticate)
     guesser = await browser(ip="10.0.1.1")
     data = {"username": "p1", "password": "wrong"}
     await asyncio.gather(*(guesser.post("/login", data=data) for _ in range(20)))
@@ -324,7 +324,7 @@ def test_login_throttle_window():
         throttle.record_failure(f"user{i}")
     now[0] = 1000
     throttle.record_failure("fresh")
-    assert len(throttle._failures) == 1
+    assert len(throttle) == 1
 
 
 @pytest.mark.parametrize(

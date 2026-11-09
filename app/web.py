@@ -9,7 +9,6 @@ requires a login, also new ones, so nothing personal is visible to the rest of t
 """
 
 from datetime import date, datetime, timedelta
-from fractions import Fraction
 from pathlib import Path
 from typing import Annotated
 
@@ -22,10 +21,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app import deps
+from app import deps, formatting
 from app.config import settings
 from app.deps import AdminUser, CurrentUser, OptionalUser, Session, require_user
-from app.formatting import long_date, short_date
 from app.models import (
     AwayPeriod,
     DishwasherClear,
@@ -36,11 +34,8 @@ from app.models import (
     Trip,
     User,
 )
-from app.services import auth, carpool, dishwasher, duties, jobs, strikes, users
-from app.services.dishwasher import DishwasherError
-from app.services.duties import DutyError
-from app.services.login_throttle import account_throttle, login_throttle
-from app.services.users import UserError
+from app.services import auth, dishwasher, duties, jobs, strikes, users
+from app.services.errors import DishwasherError, DutyError, UserError
 
 public = APIRouter()
 router = APIRouter(dependencies=[Depends(require_user)])
@@ -87,27 +82,27 @@ templates.env.globals["dishwasher_cooldown"] = settings.dishwasher_cooldown_minu
 templates.env.globals["dishwasher_heroes"] = settings.dishwasher_heroes
 templates.env.globals["floor_name"] = settings.floor_name
 templates.env.globals["min_password_length"] = auth.MIN_PASSWORD_LENGTH
+templates.env.globals["near_penalty"] = strikes.near_penalty
 # Appended to the stylesheet URL, so browsers load it again after it changed instead of
 # keeping an old copy from their cache.
 templates.env.globals["css_version"] = int(
     (Path(__file__).parent / "static" / "style.css").stat().st_mtime
 )
-templates.env.filters["short_date"] = short_date
-templates.env.filters["long_date"] = long_date
-# The date with no-break spaces, so in a narrow column only the time goes to a new line.
-templates.env.filters["date_time"] = lambda d: (
-    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}".replace(
-        " ", "\u00a0", 2
-    )
-    if d
-    else ""
+templates.env.filters.update(
+    {
+        name: getattr(formatting, name)
+        for name in (
+            "short_date",
+            "long_date",
+            "date_time",
+            "signed",
+            "weekday",
+            "month_name",
+            "clock",
+            "local_date",
+        )
+    }
 )
-# Points with their sign: "+37", "−112" (a real minus sign), "0".
-templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"
-templates.env.filters["weekday"] = lambda d: f"{d:%a}"
-templates.env.filters["month_name"] = lambda d: f"{d:%B}"
-templates.env.filters["clock"] = dishwasher.clock
-templates.env.filters["local_date"] = lambda d: d.astimezone(settings.tz).date()
 
 
 def flash(request: Request, message: str, kind: str = "ok") -> None:
@@ -209,25 +204,13 @@ async def login(
     password: Annotated[str, Form()],
     next: Annotated[str, Form()] = "/",
 ):
-    """Log in. Too many failed attempts block the username from that IP for a while, and
-    (with a higher limit, so others can't easily lock someone out) from everywhere."""
+    """Log in (limited, see `auth.login`)."""
     client_ip = request.client.host if request.client else "unknown"
-    # No real account has a longer username or password; don't keep or hash such input.
-    if len(username) > users.MAX_USERNAME_LENGTH or len(password) > auth.MAX_PASSWORD_LENGTH:
-        flash(request, "Wrong username or password", "error")
+    try:
+        user = await auth.login(session, username, password, client_ip)
+    except UserError as e:
+        flash(request, str(e), "error")
         return redirect(f"/login?next={safe_next(next)}")
-    name = username.strip().lower()
-    throttle_key, account_key = f"{name}@{client_ip}", f"user:{name}"
-    if not (login_throttle.try_attempt(throttle_key) and account_throttle.try_attempt(account_key)):
-        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
-        return redirect(f"/login?next={safe_next(next)}")
-
-    user = await auth.authenticate(session, username, password)
-    if user is None:
-        flash(request, "Wrong username or password", "error")
-        return redirect(f"/login?next={safe_next(next)}")
-    login_throttle.reset(throttle_key)
-    account_throttle.reset(account_key)
     start_session(request, user)
     return redirect(safe_next(next))
 
@@ -397,19 +380,19 @@ async def dishwasher_ctx(
         state = "done"
     else:
         state = "not_needed"
-    standings = await dishwasher.standings(session, today)
-    heroes = [people[uid] for uid in await dishwasher.heroes(session, today) if uid in people]
+    summary = await dishwasher.summary_for(session, user, today)
+    heroes = [people[uid] for uid in summary.heroes if uid in people]
     return {
         "month": today,
         "last": last,
         "next_allowed": allowed if waiting else None,
         "can_undo": last is not None and dishwasher.can_undo_clear(last, user, now),
         "state": state,
-        "mine": next((s.count for s in standings if s.user_id == user.id), 0),
+        "mine": summary.mine,
         "heroes": heroes,
-        "is_hero": any(u.id == user.id for u in heroes),
+        "is_hero": summary.is_hero(user.id),
         "other_heroes": [u for u in heroes if u.id != user.id],
-        "heroes_from": dishwasher.previous_month(today),
+        "heroes_from": summary.heroes_from,
     }
 
 
@@ -524,8 +507,7 @@ async def me(request: Request, session: Session, user: CurrentUser):
         .order_by(Trip.start_date.desc())
         .limit(30)
     )
-    today = settings.today()
-    standings = await dishwasher.standings(session, today)
+    summary = await dishwasher.summary_for(session, user, settings.today())
     return render(
         request,
         "me.html",
@@ -533,9 +515,9 @@ async def me(request: Request, session: Session, user: CurrentUser):
         aways=list(aways),
         strikes=list(my_strikes),
         history=list(history),
-        dishwasher_mine=next((s.count for s in standings if s.user_id == user.id), 0),
-        is_hero=user.id in await dishwasher.heroes(session, today),
-        heroes_from=dishwasher.previous_month(today),
+        dishwasher_mine=summary.mine,
+        is_hero=summary.is_hero(user.id),
+        heroes_from=summary.heroes_from,
     )
 
 
@@ -548,30 +530,19 @@ async def add_away(
     end_date: Annotated[date, Form()],
 ):
     """Add an away period for yourself. Says so if a duty you already have falls into it."""
-    user_id, now = user.id, settings.now()
     try:
-        await users.add_away(session, user, start_date, end_date, now.date())
+        kept = await users.add_away(session, user, start_date, end_date, settings.now())
         await session.commit()
     except UserError as e:
         flash(request, str(e), "error")
         return redirect("/me")
     flash(request, "Away period added")
-    for duty in Duty:
-        trip = await duties.current_trip(session, duty, now)
-        if (
-            trip is not None
-            and trip.start_date <= end_date
-            and start_date <= trip.end_date
-            and any(
-                pd.user_id == user_id and pd.status is Status.pending
-                for pd in trip.potential_drivers
-            )
-        ):
-            flash(
-                request,
-                f"Your current {duty.label.lower()} stays with you; if you can't do it, "
-                "ask the floor speaker to excuse it",
-            )
+    for duty in kept:
+        flash(
+            request,
+            f"Your current {duty.label.lower()} stays with you; if you can't do it, "
+            "ask the floor speaker to excuse it",
+        )
     return redirect("/me")
 
 
@@ -596,27 +567,15 @@ async def change_password(
     old_password: Annotated[str, Form()],
     new_password: Annotated[str, Form()],
 ):
-    """Change your own password. Wrong old passwords are limited like logins."""
-    throttle_key = f"password-change:{user.id}"
-    if not login_throttle.try_attempt(throttle_key):
-        flash(request, auth.TOO_MANY_ATTEMPTS, "error")
-    elif len(old_password) > auth.MAX_PASSWORD_LENGTH or not await auth.verify_password_off_loop(
-        old_password, user.password_hash
-    ):
-        flash(request, "Old password is wrong", "error")
-    else:
-        # The old password was right, so the attempt doesn't count, even if the new one
-        # is too short.
-        login_throttle.reset(throttle_key)
-        if error := auth.check_password_length(new_password):
-            flash(request, error, "error")
-        else:
-            # Logs out the other devices; this browser stays logged in.
-            user.password_hash = await auth.hash_password_off_loop(new_password)
-            auth.end_sessions(user)
-            await session.commit()
-            start_session(request, user)
-            flash(request, "Password changed")
+    """Change your own password; this browser stays logged in, the others don't."""
+    try:
+        await auth.change_password(user, old_password, new_password)
+    except UserError as e:
+        flash(request, str(e), "error")
+        return redirect("/me")
+    await session.commit()
+    start_session(request, user)
+    flash(request, "Password changed")
     return redirect("/me")
 
 
@@ -664,7 +623,7 @@ async def history(request: Request, session: Session, user: CurrentUser, until: 
 async def stats(request: Request, session: Session, user: CurrentUser):
     """Per resident: duties driven and missed, score and strikes."""
     all_users = await users.list_users(session)
-    balances = {d: await duties.load_balances(session, d) for d in Duty}
+    points = await duties.points(session, all_users)
     rows = (
         await session.execute(
             select(
@@ -679,14 +638,6 @@ async def stats(request: Request, session: Session, user: CurrentUser):
         counts[key] = counts.get(key, 0) + 1
     counts_by_user = await strikes.active_counts(session)
     active = {u.id: counts_by_user.get(u.id, 0) for u in all_users}
-    # Whole points per duty instead of fractions; ties go by who is chosen next.
-    ids = [u.id for u in all_users]
-    rooms = {u.id: u.room_number for u in all_users}
-    points = {}
-    for d, b in balances.items():
-        queue = carpool.choose_potential_drivers(b, ids, len(ids), rooms)
-        scores = {uid: b[uid].score if uid in b else Fraction(0) for uid in ids}
-        points[d] = carpool.display_points(scores, queue)
     today = settings.today()
     by_id = {u.id: u for u in all_users}
     return render(
@@ -818,24 +769,20 @@ async def admin_edit_user(
 ):
     """Change a resident's name, room, password or admin role (not your own role)."""
     target = await _get_user(session, user_id)
-    if password and (error := auth.check_password_length(password)):
-        flash(request, error, "error")
-        return redirect("/admin")
     try:
-        if room_number.strip():
-            target.room_number = users.check_room(room_number)
-        if name.strip():
-            target.name = users.check_name(name)
+        await users.update(
+            session,
+            target,
+            user,
+            name=name,
+            room_number=room_number,
+            password=password,
+            is_admin=is_admin,
+        )
     except UserError as e:
         await session.rollback()
         flash(request, str(e), "error")
         return redirect("/admin")
-    if target.id != user.id:
-        target.is_admin = is_admin
-    if password:
-        # Whoever knew the old password (or has a session) is logged out.
-        target.password_hash = await auth.hash_password_off_loop(password)
-        auth.end_sessions(target)
     await session.commit()
     if target.id == user.id:
         start_session(request, user)  # your own new password: stay logged in here
@@ -908,7 +855,7 @@ async def admin_add_away(
     target = await _get_user(session, int(user_id))
     name = target.display_name
     try:
-        await users.add_away(session, target, start_date, end_date, settings.today())
+        await users.add_away(session, target, start_date, end_date, settings.now())
         await session.commit()
     except UserError as e:
         flash(request, str(e), "error")

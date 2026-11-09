@@ -73,7 +73,7 @@ async def kitchen_pair(session, people, day=MONDAY, admin_off=False) -> Pair:
     `admin_off` keeps the floor speaker (people[0]) off that day, so they're an outsider.
     """
     if admin_off:
-        await users.add_away(session, people[0], day, day, day)
+        await users.add_away(session, people[0], day, day, at(day))
     await jobs.daily_tick(session, at(day))
     trip = await duties.get_trip(session, Duty.kitchen, day)
     by_id = {p.id: p for p in people}

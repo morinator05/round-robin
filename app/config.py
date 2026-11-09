@@ -9,8 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """All settings with their defaults. `DEADLINE_HOUR=10` in the environment overrides
-    `deadline_hour`, and so on."""
+    """All settings with their defaults."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

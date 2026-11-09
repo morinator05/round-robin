@@ -9,6 +9,18 @@ from app.config import settings
 from app.models import AwayPeriod, Duty, PotentialDriver, Status, Strike, Trip, User
 from app.services import carpool
 
+# Strikes that still count: neither revoked nor used up by a penalty week (in SQL, like
+# `Strike.is_active`).
+ACTIVE = and_(Strike.revoked_at.is_(None), Strike.redeemed_by_trip_id.is_(None))
+# How far ahead a penalty week is looked for. Away periods are limited to a year ahead
+# (`users.MAX_AWAY_DAYS_AHEAD`), so this is only a safety net against an endless search.
+MAX_PENALTY_WEEKS_AHEAD = 104
+
+
+def near_penalty(active: int) -> bool:
+    """Whether `active` strikes are one (or none) short of a penalty week."""
+    return active >= settings.strike_threshold - 1
+
 
 async def for_potential_driver(session: AsyncSession, potential_driver_id: int) -> list[Strike]:
     """All strikes given for one duty, active or not."""
@@ -17,11 +29,6 @@ async def for_potential_driver(session: AsyncSession, potential_driver_id: int) 
             select(Strike).where(Strike.potential_driver_id == potential_driver_id)
         )
     )
-
-
-# Strikes that still count: neither revoked nor used up by a penalty week (in SQL, like
-# `Strike.is_active`).
-ACTIVE = and_(Strike.revoked_at.is_(None), Strike.redeemed_by_trip_id.is_(None))
 
 
 async def active_strikes(session: AsyncSession, user_id: int) -> list[Strike]:
@@ -37,7 +44,7 @@ async def active_strikes(session: AsyncSession, user_id: int) -> list[Strike]:
 
 async def active_counts(session: AsyncSession) -> dict[int, int]:
     """Number of active strikes per user id, for everyone at once (users without any are
-    missing)."""
+    left out)."""
     rows = await session.execute(
         select(Strike.user_id, func.count()).where(ACTIVE).group_by(Strike.user_id)
     )
@@ -110,11 +117,6 @@ async def cancel_penalty(session: AsyncSession, trip: Trip) -> None:
     await session.flush()
 
 
-# How far ahead a penalty week is looked for. Away periods are limited to a year ahead
-# (`users.MAX_AWAY_DAYS_AHEAD`), so this is only a safety net against an endless search.
-MAX_PENALTY_WEEKS_AHEAD = 104
-
-
 async def next_free_penalty_week(
     session: AsyncSession, user_id: int, today: date, exclude_trip_id: int | None = None
 ) -> date:
@@ -122,32 +124,26 @@ async def next_free_penalty_week(
 
     `exclude_trip_id`: a penalty trip that is being moved, so its own week counts as free.
     """
-    taken = set(
-        await session.scalars(
-            select(Trip.start_date).where(
-                Trip.duty == Duty.trash,
-                Trip.start_date > today,
-                Trip.id != (exclude_trip_id or 0),
-            )
+    query = select(Trip.start_date).where(Trip.duty == Duty.trash, Trip.start_date > today)
+    if exclude_trip_id is not None:
+        query = query.where(Trip.id != exclude_trip_id)
+    taken = set(await session.scalars(query))
+    away = (
+        await session.execute(
+            select(AwayPeriod.start_date, AwayPeriod.end_date).where(AwayPeriod.user_id == user_id)
         )
-    )
-    away = [
-        (a.start_date, a.end_date)
-        for a in await session.scalars(select(AwayPeriod).where(AwayPeriod.user_id == user_id))
-    ]
-    member = carpool.Member(id=user_id, room="", away=tuple(away))
+    ).all()
     first = carpool.week_start(today) + timedelta(days=7)
     weeks = [first + timedelta(days=7 * i) for i in range(MAX_PENALTY_WEEKS_AHEAD)]
     free = [w for w in weeks if w not in taken]
-    return next((w for w in free if member.rides(w, w + timedelta(days=6))), free[0])
+    return next((w for w in free if not carpool.overlaps(away, w, w + timedelta(days=6))), free[0])
 
 
 async def check_threshold(session: AsyncSession, user_id: int, today: date) -> Trip | None:
     """Turn `strike_threshold` active strikes into a penalty trash week.
 
-    The penalty trip replaces the regular trash duty of that week; the user is its only
-    potential driver. The oldest strikes are marked as paid off by it, so they no longer
-    count.
+    The penalty trip replaces the regular trash duty of that week, with the user as its
+    only potential driver. It uses up the oldest strikes, so they no longer count.
 
     Returns:
         The penalty trip, or None if the user doesn't have enough strikes.

@@ -27,10 +27,11 @@ from sqlalchemy.engine import make_url  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
 
-from app import db, web  # noqa: E402
+from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
+from app.services import login_throttle  # noqa: E402
 from app.services.login_throttle import (  # noqa: E402
     ACCOUNT_MAX_FAILURES,
     MAX_FAILURES,
@@ -92,8 +93,8 @@ def throttles(monkeypatch):
     """Fresh login limits for every test; call it to set lower ones."""
 
     def set_limits(ip=MAX_FAILURES, account=ACCOUNT_MAX_FAILURES):
-        monkeypatch.setattr(web, "login_throttle", LoginThrottle(max_failures=ip))
-        monkeypatch.setattr(web, "account_throttle", LoginThrottle(max_failures=account))
+        monkeypatch.setattr(login_throttle, "ip_throttle", LoginThrottle(max_failures=ip))
+        monkeypatch.setattr(login_throttle, "account_throttle", LoginThrottle(max_failures=account))
 
     set_limits()
     return set_limits

@@ -28,7 +28,7 @@
       <td class="points">{{ points[Duty.trash][u.id]|signed }}</td>
       {# Green without strikes, red one strike before the penalty week, orange in between. #}
       {% set n = active[u.id] %}
-      <td class="strikes {{ 'ok' if n == 0 else ('bad' if n >= strike_threshold - 1 else 'warn') }}">{{ n }} / {{ strike_threshold }}</td>
+      <td class="strikes {{ 'ok' if n == 0 else ('bad' if near_penalty(n) else 'warn') }}">{{ n }} / {{ strike_threshold }}</td>
       <td class="num count">{{ counts.get((u.id, Duty.kitchen, Status.drove), 0) }}</td>
       <td class="num count">{{ counts.get((u.id, Duty.kitchen, Status.missed), 0) }}</td>
       <td class="num count">{{ counts.get((u.id, Duty.trash, Status.drove), 0) }}</td>

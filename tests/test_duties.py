@@ -268,7 +268,7 @@ async def history(session, people, days: int, seed: int) -> date:
         day = MONDAY + timedelta(days=i)
         await jobs.daily_tick(session, at(day, hour))
         if i == 2:
-            await users.add_away(session, people[5], day, day + timedelta(days=3), day)
+            await users.add_away(session, people[5], day, day + timedelta(days=3), at(day))
         if i == 4:
             await users.delete(session, people[9], at(day, 12))
         await session.commit()
@@ -327,10 +327,9 @@ async def test_unavailable_resident(session, how):
     pair = await kitchen_pair(session, people)
     on_duty_id = pair.p1.id
     rider_id = next(p.id for p in people if p.id not in pair.ids)
-    for uid in (rider_id, on_duty_id):
-        person = await session.get(User, uid)
+    for person in (await session.get(User, rider_id), pair.p1):
         if how == "away":
-            await users.add_away(session, person, MONDAY, MONDAY + timedelta(days=3), MONDAY)
+            await users.add_away(session, person, MONDAY, MONDAY + timedelta(days=3), at(MONDAY))
         elif how == "paused":
             await users.set_active(session, person, False, at(MONDAY, 12))
         else:
