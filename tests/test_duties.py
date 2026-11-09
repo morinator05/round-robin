@@ -164,8 +164,8 @@ async def test_undo_done(session):
     await duties.mark_as_driver(session, pair.first, pair.p1, marked)
 
     # Only whoever marked it (and the floor speaker), only for a few minutes.
-    soon = marked + timedelta(minutes=duties.UNDO_MINUTES - 1)
-    late = marked + timedelta(minutes=duties.UNDO_MINUTES + 1)
+    soon = marked + timedelta(minutes=settings.undo_minutes - 1)
+    late = marked + timedelta(minutes=settings.undo_minutes + 1)
     assert not duties.can_undo(pair.first, pair.p2, soon)
     assert duties.can_undo(pair.first, admin, soon)
     assert not duties.can_undo(pair.first, pair.p1, late)

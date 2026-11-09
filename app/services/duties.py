@@ -20,9 +20,6 @@ from app.services import carpool, dishwasher, strikes
 from app.services.carpool import Balance, Member
 from app.services.errors import DutyError
 
-# How long a "Done" can be taken back (a mis-tap), see `undo_driver`.
-UNDO_MINUTES = 10
-
 
 def potential_drivers_per_trip(duty: Duty) -> int:
     """How many potential drivers a trip gets. Only one of them has to actually drive."""
@@ -464,7 +461,7 @@ async def mark_as_driver(
 def can_undo(pd: PotentialDriver, actor: User, now: datetime) -> bool:
     """Whether `actor` may take back `pd`'s "Done" now (see `undo_driver`).
 
-    Only whoever marked it (or the floor speaker), within `UNDO_MINUTES`, before the
+    Only whoever marked it (or the floor speaker), within `settings.undo_minutes`, before the
     trip's deadline, and only if nothing on the trip was disputed: then nobody on it was
     missed or struck before, and undoing is the exact inverse of `mark_as_driver`.
     """
@@ -472,7 +469,7 @@ def can_undo(pd: PotentialDriver, actor: User, now: datetime) -> bool:
         return False
     if not (actor.is_admin or pd.completed_by_id == actor.id):
         return False
-    if now - pd.completed_at > timedelta(minutes=UNDO_MINUTES) or now >= deadline(pd.trip):
+    if now - pd.completed_at > timedelta(minutes=settings.undo_minutes) or now >= deadline(pd.trip):
         return False
     return all(x.disputed_at is None for x in pd.trip.potential_drivers)
 
@@ -487,8 +484,8 @@ async def undo_driver(
     """
     if not can_undo(pd, actor, now):
         raise DutyError(
-            f"This can only be undone within {UNDO_MINUTES} minutes, by whoever marked it, "
-            "before the deadline"
+            f"This can only be undone within {settings.undo_minutes} minutes, "
+            "by whoever marked it, before the deadline"
         )
     for x in pd.trip.potential_drivers:
         if x is pd or x.status is Status.rode:
