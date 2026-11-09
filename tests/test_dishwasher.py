@@ -44,8 +44,8 @@ async def test_dishwasher_marking(session):
 
     # A mis-tap can be taken back by whoever marked it, for a few minutes. Then the next
     # emptying can be marked right away.
-    soon = marked + timedelta(minutes=dishwasher.UNDO_MINUTES - 1)
-    late = marked + timedelta(minutes=dishwasher.UNDO_MINUTES + 1)
+    soon = marked + timedelta(minutes=settings.undo_minutes - 1)
+    late = marked + timedelta(minutes=settings.undo_minutes + 1)
     assert not dishwasher.can_undo_clear(second, a, soon)
     assert not dishwasher.can_undo_clear(second, b, late)
     with pytest.raises(DishwasherError):

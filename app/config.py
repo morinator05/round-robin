@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     trash_people_per_week: int = 1
     # Active strikes that turn into a penalty trash week.
     strike_threshold: int = 3
+    # Minutes in which whoever marked a duty done or the dishwasher emptied can take it back.
+    undo_minutes: int = 10
     # How far ahead the dashboard preview looks.
     preview_days: int = 14
     # Minutes after an emptying of the dishwasher before anyone can mark the next one.

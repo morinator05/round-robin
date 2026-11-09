@@ -1,5 +1,6 @@
 """The dashboard: today's duties, the dishwasher, and the preview; and their buttons."""
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from fastapi import Request
@@ -24,52 +25,75 @@ async def dashboard(
     driver; `cleaner` picks which one is shown (default: yourself if you're one of them,
     else the first).
     """
-    now = settings.now()
-    today = now.date()
-    # Before the deadline hour that's still yesterday's (last week's) duty.
-    current = await jobs.current_trips(session, now)
-    kitchen, trash = current[Duty.kitchen], current[Duty.trash]
-
-    def after(trip: Trip | None) -> date:
-        """The preview starts with the first trip after the one on the card."""
-        return trip.end_date + timedelta(days=1) if trip else today
-
-    horizon = today + timedelta(days=settings.preview_days)
-    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon, today)
-    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon, today)
-    people = await users_by_id(session)
-
-    choices = [uid for uid in kitchen_preview.plans if uid is not None]
+    board = await load_board(session, settings.now())
+    people = board.people
+    plans = board.kitchen_preview.plans
+    choices = [uid for uid in plans if uid is not None]
     # Lenient: anything that isn't one of the choices (also "abc") shows the default.
     try:
         chosen = int(cleaner) if cleaner and cleaner.isascii() else None
     except ValueError:
         chosen = None
-    if chosen not in kitchen_preview.plans:
-        chosen = user.id if user.id in choices else next(iter(kitchen_preview.plans))
-    kitchen_plan = kitchen_preview.plans[chosen]
+    if chosen not in plans:
+        chosen = user.id if user.id in choices else next(iter(plans))
+    kitchen_plan = plans[chosen]
     # The open trip's potential drivers who aren't up again within the plan (usually
     # whoever cleans): said below it, so nobody wonders where they went.
     shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
     later = [people[uid] for uid in choices if uid not in shown and uid in people]
-    trash_plan = next(iter(trash_preview.plans.values()))
     return render(
         request,
         "dashboard.html",
         user,
-        you=await you_ctx(session, user, now, kitchen, trash, kitchen_preview, trash_plan, people),
-        kitchen=duty_card_ctx(kitchen, Duty.kitchen, user, now),
-        trash=duty_card_ctx(trash, Duty.trash, user, now),
+        you=await you_ctx(session, user, board),
+        kitchen=duty_card_ctx(board.kitchen, Duty.kitchen, user, board.now),
+        trash=duty_card_ctx(board.trash, Duty.trash, user, board.now),
         kitchen_plan=kitchen_plan,
         kitchen_choices=[people[uid] for uid in choices if uid in people],
         kitchen_cleaner=chosen,
-        kitchen_open_start=kitchen_preview.open_start,
-        yesterday=today - timedelta(days=1),
+        kitchen_open_start=board.kitchen_preview.open_start,
+        yesterday=board.now.date() - timedelta(days=1),
         kitchen_later=later,
-        trash_plan=trash_plan,
+        trash_plan=board.trash_plan,
         preview_days=settings.preview_days,
         users_by_id=people,
-        dishwasher=await dishwasher_ctx(session, user, now, people),
+        dishwasher=await dishwasher_ctx(session, user, board.now, people),
+    )
+
+
+@dataclass
+class Board:
+    """What the dashboard is made of: the cards' trips, the previews and everyone's names."""
+
+    now: datetime
+    # Before the deadline hour these are still yesterday's / last week's.
+    kitchen: Trip | None
+    trash: Trip | None
+    kitchen_preview: duties.Preview
+    trash_plan: list[duties.PreviewEntry]
+    people: dict[int, User]
+
+
+async def load_board(session: AsyncSession, now: datetime) -> Board:
+    """The current trips and the previews of the trips after them."""
+    current = await jobs.current_trips(session, now)
+    kitchen, trash = current[Duty.kitchen], current[Duty.trash]
+    today = now.date()
+    horizon = today + timedelta(days=settings.preview_days)
+
+    def after(trip: Trip | None) -> date:
+        """The preview starts with the first trip after the one on the card."""
+        return trip.end_date + timedelta(days=1) if trip else today
+
+    kitchen_preview = await duties.preview(session, Duty.kitchen, after(kitchen), horizon, today)
+    trash_preview = await duties.preview(session, Duty.trash, after(trash), horizon, today)
+    return Board(
+        now=now,
+        kitchen=kitchen,
+        trash=trash,
+        kitchen_preview=kitchen_preview,
+        trash_plan=next(iter(trash_preview.plans.values())),
+        people=await users_by_id(session),
     )
 
 
@@ -100,30 +124,14 @@ def _next_in(plan: list[duties.PreviewEntry], user_id: int) -> duties.PreviewEnt
     return next((e for e in plan if user_id in e.potential_drivers), None)
 
 
-async def you_ctx(
-    session: AsyncSession,
-    user: User,
-    now: datetime,
-    kitchen: Trip | None,
-    trash: Trip | None,
-    kitchen_preview: duties.Preview,
-    trash_plan: list[duties.PreviewEntry],
-    people: dict[int, User],
-) -> dict:
-    """The "you" line at the top of the dashboard: your duties now, your next ones, your
-    strikes, and a pointer to the help for someone who has never had a duty."""
+def kitchen_outcomes(preview: duties.Preview, user: User, people: dict[int, User]) -> list[dict]:
+    """Your next kitchen day for each possible outcome of the open trip (who cleans it).
 
-    def has(trip: Trip | None, status: Status) -> bool:
-        """Whether the user is on `trip` with `status`."""
-        return trip is not None and any(
-            pd.user_id == user.id and pd.status is status for pd in trip.potential_drivers
-        )
-
-    # Your next kitchen day for each possible outcome of the open trip (who cleans it),
-    # earliest first; outcomes giving the same day are one. With a single outcome it also
-    # names who you'll be on it with.
+    Earliest first; outcomes giving the same day are one. Each also names who you'll be on
+    it with, which the dashboard says when there is a single outcome.
+    """
     outcomes: list[dict] = []
-    for uid, plan in kitchen_preview.plans.items():
+    for uid, plan in preview.plans.items():
         entry = _next_in(plan, user.id)
         start = entry.start if entry else None
         if any(o["start"] == start for o in outcomes):
@@ -138,11 +146,23 @@ async def you_ctx(
                 "partners": [p for p in partners if p is not None and p.id != user.id],
             }
         )
-    outcomes.sort(key=lambda o: o["start"] or date.max)
+    return sorted(outcomes, key=lambda o: o["start"] or date.max)
+
+
+async def you_ctx(session: AsyncSession, user: User, board: Board) -> dict:
+    """The "you" line at the top of the dashboard: your duties now, your next ones, your
+    strikes, and a pointer to the help for someone who has never had a duty."""
+
+    def has(trip: Trip | None, status: Status) -> bool:
+        """Whether the user is on `trip` with `status`."""
+        return trip is not None and any(
+            pd.user_id == user.id and pd.status is status for pd in trip.potential_drivers
+        )
+
+    kitchen, trash, today = board.kitchen, board.trash, board.now.date()
     duty_count = await session.scalar(
         select(func.count(PotentialDriver.id)).where(PotentialDriver.user_id == user.id)
     )
-    today = now.date()
     return {
         "inactive": not user.active,
         "kitchen_now": has(kitchen, Status.pending),
@@ -154,8 +174,8 @@ async def you_ctx(
         "trash_deadline": duties.deadline(trash) if trash else None,
         "trash_now": has(trash, Status.pending),
         "trash_done": has(trash, Status.drove),
-        "kitchen_outcomes": outcomes,
-        "trash_next": _next_in(trash_plan, user.id),
+        "kitchen_outcomes": kitchen_outcomes(board.kitchen_preview, user, board.people),
+        "trash_next": _next_in(board.trash_plan, user.id),
         "strikes": len(await strikes.active_strikes(session, user.id)),
         "is_new": not duty_count,
     }
