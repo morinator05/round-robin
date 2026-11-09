@@ -136,7 +136,7 @@ In `.env`, see `.env.example`.
 ```bash
 cp .env.example .env                    # set SECRET_KEY: openssl rand -hex 32
 docker compose up -d --build            # database + app, http://localhost:8000
-docker compose exec app python scripts/create_admin.py   # first floor speaker
+docker compose exec app python -m scripts.create_admin   # first floor speaker
 ```
 
 - **First floor speaker without the script:** set the `ADMIN_*` variables in `.env`. The app
@@ -145,7 +145,7 @@ docker compose exec app python scripts/create_admin.py   # first floor speaker
 - **Server:** set a random `POSTGRES_PASSWORD` before the first start (later changes need
   `ALTER USER <user> PASSWORD '...'` in the database).
 - **Update:** `docker compose up -d --build`. Migrations run on every start.
-- **Test residents:** `docker compose exec app python scripts/seed.py`. Add
+- **Test residents:** `docker compose exec app python -m scripts.seed`. Add
   `--days 30` (on an empty database) for a simulated month of duties, misses and strikes.
 - **Reset:** `docker compose down -v` deletes the database.
 
@@ -169,6 +169,6 @@ uv run ruff check . && uv run ruff format --check .   # lint, as in CI
 
 - `app/services/carpool.py`: the fairness logic, without database (start reading here)
 - `app/services/`: the other rules (duties, strikes, dishwasher, users, login, daily job)
-- `app/web.py`: pages and form actions; templates in `app/templates/`
+- `app/web/`: pages and form actions, one module per page; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
 - `scripts/`: create the first floor speaker, add test residents

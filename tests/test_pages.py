@@ -423,7 +423,7 @@ async def test_admin_absences(session, browser, clock):
     assert "The end can't be before the start" in await follow(admin, r)
 
     away_id = await session.scalar(select(AwayPeriod.id))
-    r = await admin.post(f"/me/away/{away_id}/delete?next=/admin")
+    r = await admin.post(f"/admin/aways/{away_id}/delete")
     assert r.headers["location"] == "/admin"
     assert await session.scalar(select(func.count(AwayPeriod.id))) == 0
 

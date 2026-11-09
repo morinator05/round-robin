@@ -45,6 +45,11 @@ class Duty(str, enum.Enum):
         """Name shown in the UI."""
         return {"kitchen": "Kitchen duty", "trash": "Trash duty"}[self.value]
 
+    @property
+    def short_label(self) -> str:
+        """Name without "duty", for tables: "Kitchen"."""
+        return self.label.removesuffix(" duty")
+
 
 class Status(str, enum.Enum):
     """State of one potential driver of a trip."""

@@ -1,7 +1,7 @@
-{# One duty card on the dashboard. Expects: trip (or None), duty, deadline,
-   can_mark_as_driver(potential driver).
-   The "Done" button posts via htmx and gets the dashboard back; it takes this card and the
-   previews from it. #}
+{# One duty card on the dashboard. Expects `card` (`dashboard.duty_card_ctx`).
+   The "Done" button posts via htmx and gets the dashboard back; it takes this card, the
+   "you" line and the previews from it. #}
+{% set trip, duty, day, deadline = card.trip, card.duty, card.day, card.deadline %}
 <section class="card duty" id="card-{{ duty.value }}">
   <h2>
     {{ duty.label }}
@@ -13,7 +13,7 @@
      next one comes, so nobody wonders who is on today. #}
   {% if trip and trip.end_date < today %}
     <p class="muted assigned">{{ "Today's kitchen" if duty == Duty.kitchen else "This week's trash" }}
-      duty is assigned at {{ "%02d"|format(deadline_hour) }}:05.</p>
+      duty is assigned at {{ assign_time }}.</p>
   {% endif %}
   {% if trip and trip.is_penalty %}<p class="penalty">Penalty trash duty ({{ strike_threshold }} strikes)</p>{% endif %}
   {% if not trip or not trip.potential_drivers %}
@@ -22,23 +22,23 @@
     {% for pd in trip.potential_drivers %}
       <div class="person">
         <div class="name">{{ person(pd.user) }}</div>
-        {% if can_mark_as_driver(pd) %}
+        {% if card.can_mark_as_driver(pd) %}
           <button class="primary" hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
                   hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">
             {#- Your own: what you did. Someone else's (floor speaker): what the click does. #}
-            {{- "I cleaned it" if user and pd.user_id == user.id else "Mark done" -}}
+            {{- "I cleaned it" if pd.user_id == user.id else "Mark done" -}}
           </button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
       </div>
     {% endfor %}
-    {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    {% set driver = trip.driver %}
     {% if driver %}
       <p class="muted foot">Done by {{ person(driver.user) }}
         on {{ driver.completed_at|date_time }}
-        {% if can_undo is defined and can_undo(driver) %}·
+        {% if card.can_undo(driver) %}·
           <button class="link" hx-post="/potential-drivers/{{ driver.id }}/undo?card=1"
                   hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
                   hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">Undo</button>
@@ -47,7 +47,7 @@
       <p class="muted foot">Disputed – the floor speaker decides who gets the credit</p>
     {% else %}
       {# What to do and by when; "you" for the people on it. #}
-      {% set mine = user and trip.potential_drivers|selectattr("user_id", "equalto", user.id)|list %}
+      {% set mine = trip.potential_drivers|selectattr("user_id", "equalto", user.id)|list %}
       {% set by = (deadline|weekday) ~ " " ~ (deadline|short_date) ~ ", " ~ (deadline|clock) %}
       <p class="muted foot">
         {%- if trip.potential_drivers|length > 1 %}

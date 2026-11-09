@@ -9,12 +9,19 @@
    floor speaker doesn't land at the top of the long page every time. #}
 {% macro name(u) %}{{ u.display_name if u else "the former resident" }}{% endmacro %}
 {% macro when(trip) %}{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% endmacro %}
-{# The buttons for one person on a duty: Done while nobody has, Undo for a moment after,
-   Dispute a done one, Excuse an open or missed one, and (with `keep`, in "Needs attention")
-   Keep missed to leave a missed one as it is. #}
+{# The columns of both duty tables, so they line up; `first` heads the date column. #}
+{% macro trip_head(first) %}<colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+  <thead><tr><th>{{ first }}</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>{% endmacro %}
+{% macro resident_select(residents) %}<label>Resident
+  <select name="user_id" required>
+    <option value="">Choose resident…</option>
+    {% for u in residents %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
+  </select>
+</label>{% endmacro %}
+{# The buttons for one person on a duty; Keep missed only in "Needs attention" (`keep`). #}
 {% macro duty_actions(pd, trip, keep=false) %}
   {%- set what = trip.duty.label|lower ~ " on " ~ when(trip) %}
-  {%- if not trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+  {%- if can_mark(pd) %}
     <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
       <button class="secondary">Done</button></form>
   {%- endif %}
@@ -37,29 +44,10 @@
       <button class="secondary">Keep missed</button></form>
   {%- endif %}
 {%- endmacro %}
-{% set all_pds = trips|map(attribute="potential_drivers")|sum(start=[]) %}
-{% set todo = all_pds|selectattr("status", "in", [Status.pending, Status.missed])|list %}
-{% set active_strikes = strikes|rejectattr("revoked_at")|rejectattr("redeemed_by_trip_id")|list %}
-{% set old_strikes = strikes|reject("in", active_strikes)|list %}
-{# Overdue: missed (not disputed, not kept as missed), a strike was given, a decision is
-   needed. Still open: not marked yet but in time; a duty that hasn't started (a coming
-   penalty week) isn't. #}
-{% set overdue = [] %}
-{% set open_now = [] %}
-{% for trip in trips %}{% for pd in trip.potential_drivers %}
-  {% if pd.status == Status.missed and not pd.disputed_at and not pd.kept_missed_at %}{% set _ = overdue.append((trip, pd)) %}
-  {% elif pd.status == Status.pending and trip.start_date <= today %}{% set _ = open_now.append((trip, pd)) %}{% endif %}
-{% endfor %}{% endfor %}
-{% set waiting = overdue + open_now %}
-{% set near = [] %}
-{% for u in users %}
-  {% set n = active_strikes|selectattr("user_id", "equalto", u.id)|list|length %}
-  {% if near_penalty(n) %}{% set _ = near.append((u, n)) %}{% endif %}
-{% endfor %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 <div class="jump" role="navigation" aria-label="Sections">
-  <a href="#attention">Needs attention <span class="muted">{{ waiting|length + near|length }}</span></a>
-  <a href="#duties">Duties <span class="muted">{{ todo|length }}<span class="wide-only"> open or missed</span></span></a>
+  <a href="#attention">Needs attention <span class="muted">{{ attention|length }}</span></a>
+  <a href="#duties">Duties <span class="muted">{{ open_duties }}<span class="wide-only"> open or missed</span></span></a>
   <a href="#strikes">Strikes <span class="muted">{{ active_strikes|length }}<span class="wide-only"> active</span></span></a>
   <a href="#absences">Absences <span class="muted">{{ aways|length }}</span></a>
   <a href="#dishwasher">Dishwasher <span class="muted">{{ dishwasher_clears|length }}</span></a>
@@ -69,15 +57,14 @@
 
 <section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
   <h2>Needs attention</h2>
-  {% if not waiting and not near %}<p class="muted">Nothing needs attention.</p>{% endif %}
+  {% if not attention|length %}<p class="muted">Nothing needs attention.</p>{% endif %}
   {% macro attention_list(title, rows, note, keep=false) %}
     <h3>{{ title }}</h3>
     <div class="table-wrap"><table class="trips attention">
-      <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
-      <thead><tr><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+      {{ trip_head("Duty") }}
       {% for trip, pd in rows %}
         <tbody class="trip"><tr>
-          <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
+          <td rowspan="1">{{ when(trip) }}, {{ trip.duty.short_label|lower }}</td>
           <td>{{ person(pd.user) }}{% if note %} <span class="muted">{{ note }}</span>{% endif %}</td>
           <td>{% include "partials/status.html" %}</td>
           <td class="end">{{ duty_actions(pd, trip, keep) }}</td>
@@ -85,13 +72,13 @@
       {% endfor %}
     </table></div>
   {% endmacro %}
-  {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given", keep=true) }}{% endif %}
-  {% if open_now %}{{ attention_list("Still open – in time, nothing to do yet", open_now, none) }}{% endif %}
-  {% if near %}
+  {% if attention.overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", attention.overdue, "strike given", keep=true) }}{% endif %}
+  {% if attention.open_now %}{{ attention_list("Still open – in time, nothing to do yet", attention.open_now, none) }}{% endif %}
+  {% if attention.near %}
     {# One strike or less before a penalty week. #}
     <h3>Close to a penalty week</h3>
     <ul class="near">
-      {% for u, n in near %}<li>{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }} strikes</a></li>{% endfor %}
+      {% for u, n in attention.near %}<li>{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }} strikes</a></li>{% endfor %}
     </ul>
   {% endif %}
 </section>
@@ -100,16 +87,15 @@
   <h2>Duties <span class="muted">last 14 days</span></h2>
   {# One table per duty: the last 7 days in view, the week before folded away under a count
      (the same columns, so both line up). #}
-  {% macro trip_table(list) %}
+  {% macro trip_table(rows) %}
   <div class="table-wrap"><table class="trips">
-    <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
-    <thead><tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
-    {% for trip in list %}
+    {{ trip_head("Date") }}
+    {% for trip in rows %}
       <tbody class="trip">
       {% for pd in trip.potential_drivers %}
         <tr>
           {% if loop.first %}
-          <td rowspan="{{ loop.length }}">{{ when(trip) }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
+          <td rowspan="{{ loop.length }}">{{ trip|trip_dates }}
             {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
           {% endif %}
           <td>{{ person(pd.user) }}{% if pd.status == Status.missed and pd.kept_missed_at %} <span class="muted">kept missed</span>{% endif %}</td>
@@ -124,10 +110,10 @@
   </table></div>
   {% endmacro %}
   {% for duty in Duty %}
-  {% set mine = trips|selectattr("duty", "equalto", duty)|list %}
-  {% set earlier = mine|selectattr("end_date", "<=", fold_before)|list %}
+  {% set duty_trips = trips|selectattr("duty", "equalto", duty)|list %}
+  {% set earlier = duty_trips|selectattr("end_date", "<=", fold_before)|list %}
   <h3>{{ duty.label }}</h3>
-  {{ trip_table(mine|reject("in", earlier)|list) }}
+  {{ trip_table(duty_trips|reject("in", earlier)|list) }}
   {% if earlier %}
     <details class="older">
       <summary>{{ earlier|length }} earlier {{ ("day" if duty == Duty.kitchen else "week") ~ ("" if earlier|length == 1 else "s") }}</summary>
@@ -139,12 +125,12 @@
   <form method="post" action="/admin/tick" class="actions"
         hx-confirm="Run the daily job now? It marks overdue duties missed (with their strikes) and assigns today's duties. It changes nothing that's already done.">
     <button class="secondary">Run daily job now</button>
-    <span class="muted">Runs by itself every day at {{ "%02d"|format(deadline_hour) }}:05.</span>
+    <span class="muted">Runs by itself every day at {{ assign_time }}.</span>
   </form>
 </section>
 
-{% macro strike_rows(list) %}
-  {% for s in list %}
+{% macro strike_rows(rows) %}
+  {% for s in rows %}
     <tr{% if s.revoked_at or s.redeemed_by_trip_id %} class="muted"{% endif %}>
       <td>{{ s.created_at|date_time }}</td>
       <td>{{ person(s.user) }}</td>
@@ -168,12 +154,7 @@
         hx-on:htmx:confirm="event.preventDefault();
           const who = this.user_id.selectedOptions[0]?.text || 'this resident';
           if (confirm(`Give ${who} a strike: “${this.reason.value}”? With {{ strike_threshold }} active strikes a penalty week follows right away.`)) event.detail.issueRequest();">
-    <label>Resident
-      <select name="user_id" required>
-        <option value="">Choose resident…</option>
-        {% for u in users %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
-      </select>
-    </label>
+    {{ resident_select(users) }}
     <label class="grow">Reason <input name="reason" required></label>
     <button class="danger">Give strike</button>
   </form>
@@ -196,12 +177,7 @@
   <h2>Absences <span class="muted">current and upcoming</span></h2>
   {# For a resident who tells the floor speaker in person. #}
   <form method="post" action="/admin/aways" class="row away-form">
-    <label>Resident
-      <select name="user_id" required>
-        <option value="">Choose resident…</option>
-        {% for u in users if u.active %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
-      </select>
-    </label>
+    {{ resident_select(users|selectattr("active")) }}
     <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
     <label>To <input type="date" name="end_date" required></label>
     <button>Add</button>
@@ -214,7 +190,7 @@
         <td>{{ person(a.user) }}</td>
         <td>{{ a.start_date|short_date }}–{{ a.end_date|long_date }}</td>
         <td class="end">
-          <form method="post" action="/me/away/{{ a.id }}/delete?next=/admin" class="inline"
+          <form method="post" action="/admin/aways/{{ a.id }}/delete" class="inline"
                 hx-confirm="Delete this absence of {{ a.user.first_name }}?">
             <button class="secondary">Delete</button>
           </form>
@@ -254,7 +230,7 @@
     <div class="panel">
     <form method="post" action="/admin/users" class="row">
       <label>Name <input name="name" required></label>
-      <label class="short">Room <input name="room_number" placeholder="e.g. E104" required pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
+      <label class="short">Room <input name="room_number" placeholder="e.g. E104" required pattern="{{ room_pattern }}" title="Letter, floor, room 01–99, e.g. E103"></label>
       <label>Username <input name="username" required></label>
       <label>Initial password <input name="password" minlength="{{ min_password_length }}" required></label>
       <label class="check"><span><input type="checkbox" name="is_admin" value="true"> Floor speaker</span></label>
@@ -274,7 +250,7 @@
       <div class="panel">
         <form method="post" action="/admin/users/{{ u.id }}/edit" class="row">
           <label>Name <input name="name" value="{{ u.name }}"></label>
-          <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
+          <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="{{ room_pattern }}" title="Letter, floor, room 01–99, e.g. E103"></label>
           <label class="wide">New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
           <label class="check"><span><input type="checkbox" name="is_admin" value="true" {% if u.is_admin %}checked{% endif %}
                  {% if u.id == user.id %}disabled{% endif %}> Floor speaker</span></label>

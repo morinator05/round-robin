@@ -1,8 +1,8 @@
 """Seed the database with test residents, optionally with a simulated history.
 
-    uv run python scripts/seed.py                  # 10 residents
-    uv run python scripts/seed.py -n 20 --password test1234
-    uv run python scripts/seed.py --days 30        # plus a simulated month of duties
+    uv run python -m scripts.seed                  # 10 residents
+    uv run python -m scripts.seed -n 20 --password test1234
+    uv run python -m scripts.seed --days 30        # plus a simulated month of duties
 
 Usernames are the lowercase names; existing usernames are skipped, so it is
 safe to run more than once. Current trips that nobody has driven yet get their
@@ -22,18 +22,15 @@ import asyncio
 import random
 import sys
 from datetime import date, datetime, time, timedelta
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from sqlalchemy import delete, func, select, update  # noqa: E402
-from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
-from sqlalchemy.orm import selectinload  # noqa: E402
-
-from app.config import settings  # noqa: E402
-from app.db import SessionLocal  # noqa: E402
-from app.models import Duty, PotentialDriver, Status, Strike, Trip, User  # noqa: E402
-from app.services import dishwasher, duties, jobs, users  # noqa: E402
+from app.config import settings
+from app.db import SessionLocal
+from app.models import Duty, PotentialDriver, Status, Strike, Trip, User
+from app.services import dishwasher, duties, jobs, users
 
 # fmt: off
 # Star Trek (TOS and TNG) nicknames, so no test resident shares a real resident's name

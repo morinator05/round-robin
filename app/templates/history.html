@@ -15,10 +15,10 @@
   <colgroup><col class="col-date"><col><col>{% if user.is_admin %}<col class="col-action">{% endif %}</colgroup>
   <tr><th>Date</th><th>Assigned</th><th>Done by</th>{% if user.is_admin %}<th class="end"></th>{% endif %}</tr>
   {% for trip in trips if trip.duty == duty %}
-    {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    {% set driver = trip.driver %}
     {% set disputed = trip.potential_drivers|selectattr("disputed_at")|first %}
     <tr>
-      <td>{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
+      <td>{{ trip|trip_dates }}
           {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
       <td>
         {% for pd in trip.potential_drivers %}

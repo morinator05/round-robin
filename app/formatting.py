@@ -49,3 +49,14 @@ def date_time(moment: datetime | None) -> str:
 def signed(points: int) -> str:
     """Points with their sign: "+37", "−112" (a real minus sign), "0"."""
     return f"{points:+d}".replace("-", "\u2212") if points else "0"
+
+
+def times(n: int) -> str:
+    """How often: "once", "3 times"."""
+    return "once" if n == 1 else f"{n} times"
+
+
+def trip_dates(trip) -> str:
+    """A trip's dates: "Mon 2 Nov", a week "Mon 2 Nov–8 Nov"."""
+    first = f"{weekday(trip.start_date)} {short_date(trip.start_date)}"
+    return first if trip.end_date == trip.start_date else f"{first}–{short_date(trip.end_date)}"

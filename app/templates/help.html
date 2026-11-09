@@ -13,7 +13,7 @@
   <p><strong>Kitchen duty</strong>: every day, tidy up and clean the shared kitchen.
     {% if kitchen_people > 1 %}{{ kitchen_people }} people are assigned, but only one of them
     has to clean. Agree who cleans; whoever cleans clicks “I cleaned it”. If nobody does by
-    {{ deadline_hour }}:00 the next morning, you both get a strike.{% endif %}</p>
+    {{ deadline_time }} the next morning, you both get a strike.{% endif %}</p>
   <p><strong>Trash duty</strong>: for one week (Monday to Sunday), take out the trash.
     {% if trash_people > 1 %}{{ trash_people }} people are assigned, one of them is enough.{% endif %}</p>
   <p class="muted">The floor speaker will tell you what exactly is part of it.</p>
@@ -26,7 +26,7 @@
   <p>The <a href="/">overview</a> shows today's duties and the plan for the next
     {{ preview_days }} days. Your own name is <span class="me"><span class="person-name">highlighted</span></span>. The plan can
     still change, e.g. when someone misses a duty or is away.</p>
-  <p>New duties are given out at {{ deadline_hour }}:05 each morning; until then the overview
+  <p>New duties are given out at {{ assign_time }} each morning; until then the overview
     shows yesterday's.</p>
   <p>Until today's kitchen duty is marked done, the plan depends on who cleans. The buttons
     above the kitchen preview switch between the cases.</p>
@@ -36,7 +36,7 @@
   <h2>Marking a duty as done</h2>
   <p>Once you've cleaned, click <strong>I cleaned it</strong> next to your name on the
     <a href="/">overview</a>. Only whoever actually cleaned marks it.</p>
-  <p>Deadline: {{ deadline_hour }}:00 on the day after the duty, so for trash duty the
+  <p>Deadline: {{ deadline_time }} on the day after the duty, so for trash duty the
     Monday after your week. After that the duty counts as missed.</p>
 </section>
 
@@ -99,7 +99,7 @@
   <p><strong>Excuse</strong> and <strong>Dispute</strong>: see <a href="#status">Status</a>.</p>
   <p><strong>Keep missed</strong>: a missed duty stays missed and the strike stays; it no longer
     shows under "Needs attention". You can still mark it done or excuse it in the duties list.</p>
-  <p><strong>Daily job</strong>: runs automatically at {{ deadline_hour }}:05, marks missed
+  <p><strong>Daily job</strong>: runs automatically at {{ assign_time }}, marks missed
     duties and assigns the next ones.</p>
 </section>
 {% endif %}

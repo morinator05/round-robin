@@ -14,7 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.db import SessionLocal
-from app.deps import LoginRequired
+from app.deps import SESSION_MAX_SECONDS, LoginRequired
 from app.services import users
 from app.services.jobs import scheduled_tick
 from app.web import public, router
@@ -67,7 +67,7 @@ app.add_middleware(
     session_cookie="rr_session",
     same_site="lax",
     https_only=settings.secure_cookies,
-    max_age=60 * 60 * 24 * 90,  # stay logged in for 90 days
+    max_age=SESSION_MAX_SECONDS,
 )
 
 
@@ -91,7 +91,7 @@ async def refuse_cross_site_posts(request: Request, call_next):
 
 
 @app.middleware("http")
-async def no_caching_of_pages(request: Request, call_next):
+async def security_headers(request: Request, call_next):
     """Pages hold personal data: the browser must not keep them, e.g. for Back after
     logging out on a shared computer. Static files have nothing personal."""
     response = await call_next(request)

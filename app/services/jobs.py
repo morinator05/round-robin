@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import Lock, SessionLocal, advisory_lock
-from app.models import Duty
+from app.models import Duty, Trip
 from app.services import duties
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,16 @@ async def daily_tick(session: AsyncSession, now: datetime) -> None:
     await session.commit()
     if missed:
         log.info("Marked %d potential drivers as missed", len(missed))
+
+
+async def current_trips(session: AsyncSession, now: datetime) -> dict[Duty, Trip | None]:
+    """Each duty's `duties.current_trip`; runs the daily job first if one is missing (e.g.
+    the server was down at the deadline hour)."""
+    trips = {duty: await duties.current_trip(session, duty, now) for duty in Duty}
+    if None in trips.values():
+        await daily_tick(session, now)
+        trips = {duty: await duties.current_trip(session, duty, now) for duty in Duty}
+    return trips
 
 
 async def scheduled_tick() -> None:

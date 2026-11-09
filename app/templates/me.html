@@ -50,7 +50,7 @@
     <h2>Dishwasher {{ help_link("dishwasher") }} <span class="muted">{{ today|month_name }}</span></h2>
     {% if is_hero %}<p>You have no kitchen duty in {{ today|month_name }} as a
       <span class="tag tag-hero">dishwasher hero</span> of {{ heroes_from|month_name }}.</p>{% endif %}
-    {% if dishwasher_mine %}<p>You emptied it {{ "once" if dishwasher_mine == 1 else dishwasher_mine ~ " times" }} this month.</p>
+    {% if dishwasher_mine %}<p>You emptied it {{ dishwasher_mine|times }} this month.</p>
     {% else %}<p class="muted">You haven't emptied it this month.</p>{% endif %}
   </section>
 </div>
@@ -62,7 +62,7 @@
     <tr>
       {# A week may wrap after the dash on a phone, never inside a date. #}
       <td><span class="nowrap">{{ pd.trip.start_date|weekday }} {{ pd.trip.start_date|short_date }}</span>{% if pd.trip.end_date != pd.trip.start_date %}–<span class="nowrap">{{ pd.trip.end_date|short_date }}</span>{% endif %}</td>
-      <td>{{ pd.trip.duty.label|replace(" duty", "") }}{% if pd.trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
+      <td>{{ pd.trip.duty.short_label }}{% if pd.trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
       <td class="end">{% include "partials/status.html" %}</td>
     </tr>
   {% else %}<tr><td class="muted" colspan="3">No duties yet.</td></tr>{% endfor %}

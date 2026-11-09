@@ -19,8 +19,8 @@ uv run pytest                               # DB tests are skipped if Postgres i
 uv run pytest tests/test_duties.py::test_daily_tick_and_deadlines   # one test
 uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
-uv run python scripts/seed.py [--days 30]   # test residents (+ a simulated month on an empty DB)
-uv run python scripts/create_admin.py       # first floor speaker (admin) account
+uv run python -m scripts.seed [--days 30]  # test residents (+ a simulated month on an empty DB)
+uv run python -m scripts.create_admin      # first floor speaker (admin) account
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff and pytest against Postgres 16. With `CI` set, an
@@ -85,7 +85,7 @@ today's trips, and commits. A day's (on Monday the week's) trip is only material
 deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
 Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
 startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
-the dashboard when the current trips are missing, so it must stay idempotent. Absences, pausing and deleting users call
+the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay idempotent. Absences, pausing and deleting users call
 `duties.reconcile`, which removes them as riders and pending potential drivers of
 current/upcoming trips and chooses replacements.
 
@@ -94,16 +94,20 @@ current/upcoming trips and chooses replacements.
   They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, all in
   `services/errors.py`) with an English, user-facing message. Advisory locks:
   `db.advisory_lock(session, Lock.trips)`.
-- `app/web.py`: all routes. They parse input, call a service, commit, and turn the
-  service errors into a session flash. Every POST answers with a 303 redirect. htmx
-  requests are detected via the `HX-Request` header. New routes go on `router`, which
-  requires a login for every route; only login/logout are on `public`. Nothing with
-  personal data may be visible without a login (`test_every_page_needs_a_login`).
+- `app/web/`: the routes, one module per page (`login`, `dashboard`, `profile`, `pages`,
+  `admin`); `common.py` has the template setup and helpers. Routes parse input and run
+  their service calls through `common.act(request, session, action, to)`, which commits,
+  turns a `ServiceError` into a flash message (rolled back) and answers with a 303
+  redirect; dashboard cards (`?card=1`, htmx) get `HX-Refresh` on errors instead. Row ids
+  from paths and forms: `get_or_404`, `parse_id`. New routes go on the one shared
+  `router`, which requires a login for every route; only login/logout are on `public`.
+  Nothing with personal data may be visible without a login
+  (`test_every_route_needs_a_login`).
 - `app/deps.py`: `Session`, `OptionalUser`, `CurrentUser`, `AdminUser` are `Annotated`
   route parameter types; `CurrentUser` raises `LoginRequired`, which `main.py` turns into a
   redirect to `/login`. A session counts only if it carries the user's current
   `User.session_token`; `auth.end_sessions` (logout, password changes) sets a new one and so
-  logs the user out everywhere. Log in with `web.start_session`.
+  logs the user out everywhere. Log in with `common.start_session`.
 - `app/formatting.py`: how dates are written (`short_date` "3 Nov", `long_date`
   "3 Nov 2026"), for templates and strike reasons.
 - `app/config.py`: settings from `.env`. Use `settings.now()` / `settings.today()` (in the
