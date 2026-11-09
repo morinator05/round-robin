@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from jinja2 import pass_context
 from markupsafe import Markup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -82,6 +82,7 @@ templates.env.globals["help_link"] = help_link
 templates.env.globals["Duty"] = Duty
 templates.env.globals["Status"] = Status
 templates.env.globals["strike_threshold"] = settings.strike_threshold
+templates.env.globals["deadline_hour"] = settings.deadline_hour
 templates.env.globals["dishwasher_cooldown"] = settings.dishwasher_cooldown_minutes
 templates.env.globals["dishwasher_heroes"] = settings.dishwasher_heroes
 templates.env.globals["floor_name"] = settings.floor_name
@@ -93,8 +94,13 @@ templates.env.globals["css_version"] = int(
 )
 templates.env.filters["short_date"] = short_date
 templates.env.filters["long_date"] = long_date
+# The date with no-break spaces, so in a narrow column only the time goes to a new line.
 templates.env.filters["date_time"] = lambda d: (
-    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}" if d else ""
+    f"{long_date(d.astimezone(settings.tz))} {d.astimezone(settings.tz):%H:%M}".replace(
+        " ", "\u00a0", 2
+    )
+    if d
+    else ""
 )
 # Points with their sign: "+37", "−112" (a real minus sign), "0".
 templates.env.filters["signed"] = lambda n: f"{n:+d}".replace("-", "\u2212") if n else "0"
@@ -180,6 +186,7 @@ def duty_card_ctx(trip: Trip | None, duty: Duty, user: User | None) -> dict:
         "can_mark_as_driver": (
             lambda pd: user is not None and duties.can_mark_as_driver(pd, user, now)
         ),
+        "can_undo": lambda pd: user is not None and duties.can_undo(pd, user, now),
     }
 
 
@@ -280,11 +287,16 @@ async def dashboard(
     # whoever cleans): said below it, so nobody wonders where they went.
     shown = {uid for e in kitchen_plan for uid in e.potential_drivers}
     later = [people[uid] for uid in choices if uid not in shown and uid in people]
+    kitchen_card = duty_card_ctx(kitchen, Duty.kitchen, user)
+    trash_plan = next(iter(trash_preview.plans.values()))
     return render(
         request,
         "dashboard.html",
         user,
-        kitchen=duty_card_ctx(kitchen, Duty.kitchen, user),
+        you=await you_ctx(
+            session, user, kitchen_card, trash, kitchen_preview, chosen, trash_plan, people
+        ),
+        kitchen=kitchen_card,
         trash=duty_card_ctx(trash, Duty.trash, user),
         kitchen_plan=kitchen_plan,
         kitchen_choices=[people[uid] for uid in choices if uid in people],
@@ -292,10 +304,76 @@ async def dashboard(
         kitchen_open_start=kitchen_preview.open_start,
         yesterday=today - timedelta(days=1),
         kitchen_later=later,
-        trash_plan=next(iter(trash_preview.plans.values())),
+        trash_plan=trash_plan,
+        preview_days=settings.preview_days,
         users_by_id=people,
         dishwasher=dishwasher_card,
     )
+
+
+def _next_in(plan: list[duties.PreviewEntry], user_id: int) -> duties.PreviewEntry | None:
+    """The user's first trip in a preview plan, if they are in it."""
+    return next((e for e in plan if user_id in e.potential_drivers), None)
+
+
+async def you_ctx(
+    session: AsyncSession,
+    user: User,
+    kitchen_card: dict,
+    trash: Trip | None,
+    kitchen_preview: duties.Preview,
+    chosen: int | None,
+    trash_plan: list[duties.PreviewEntry],
+    people: dict[int, User],
+) -> dict:
+    """The "you" line at the top of the dashboard: your duties now, your next ones, your
+    strikes, and a pointer to the help for someone who has never had a duty."""
+
+    def has(trip: Trip | None, status: Status) -> bool:
+        """Whether the user is on `trip` with `status`."""
+        return trip is not None and any(
+            pd.user_id == user.id and pd.status is status for pd in trip.potential_drivers
+        )
+
+    # Your next kitchen day for each possible outcome of the open trip (who cleans it),
+    # earliest first; outcomes giving the same day are one. With a single outcome it also
+    # names who you'll be on it with.
+    outcomes: list[dict] = []
+    for uid, plan in kitchen_preview.plans.items():
+        entry = _next_in(plan, user.id)
+        start = entry.start if entry else None
+        if any(o["start"] == start for o in outcomes):
+            continue
+        partners = [people[p] for p in (entry.potential_drivers if entry else []) if p != user.id]
+        outcomes.append(
+            {
+                "entry": entry,
+                "start": start,
+                "cleaner": people.get(uid) if uid is not None else None,
+                "is_me": uid == user.id,
+                "partners": [p for p in partners if p is not None],
+            }
+        )
+    outcomes.sort(key=lambda o: o["start"] or date.max)
+    history = await session.scalar(
+        select(func.count(PotentialDriver.id)).where(PotentialDriver.user_id == user.id)
+    )
+    return {
+        "inactive": not user.active,
+        "kitchen_now": has(kitchen_card["trip"], Status.pending),
+        "kitchen_done": has(kitchen_card["trip"], Status.drove),
+        # Before the deadline hour the cards show yesterday's / last week's duty.
+        "kitchen_late": kitchen_card["day"] == "yesterday",
+        "kitchen_deadline": kitchen_card["deadline"],
+        "trash_late": trash is not None and trash.end_date < settings.today(),
+        "trash_deadline": duties.deadline(trash) if trash else None,
+        "trash_now": has(trash, Status.pending),
+        "trash_done": has(trash, Status.drove),
+        "kitchen_outcomes": outcomes,
+        "trash_next": _next_in(trash_plan, user.id),
+        "strikes": len(await strikes.active_strikes(session, user.id)),
+        "is_new": not history,
+    }
 
 
 async def dishwasher_ctx(
@@ -325,6 +403,7 @@ async def dishwasher_ctx(
         "month": today,
         "last": last,
         "next_allowed": allowed if waiting else None,
+        "can_undo": last is not None and dishwasher.can_undo_clear(last, user, now),
         "state": state,
         "mine": next((s.count for s in standings if s.user_id == user.id), 0),
         "heroes": heroes,
@@ -358,6 +437,26 @@ async def mark_dishwasher(request: Request, session: Session, user: CurrentUser)
     return redirect("/")
 
 
+@router.post("/dishwasher/{clear_id}/undo")
+async def undo_dishwasher(request: Request, session: Session, user: CurrentUser, clear_id: int):
+    """Take back your own mis-tapped emptying; from the dashboard card."""
+    card = is_card_request(request)
+    clear = await session.get(DishwasherClear, clear_id)
+    try:
+        if clear is None:
+            raise DishwasherError("That entry doesn't exist any more")
+        await dishwasher.undo_clear(session, clear, user, settings.now())
+        await session.commit()
+    except DishwasherError as e:
+        flash(request, str(e), "error")
+        if card:
+            return Response(headers={"HX-Refresh": "true"})
+        return redirect("/")
+    if not card:
+        flash(request, "Taken back")
+    return redirect("/")
+
+
 @router.post("/potential-drivers/{potential_driver_id}/drove")
 async def mark_as_driver(
     request: Request, session: Session, user: CurrentUser, potential_driver_id: int
@@ -379,6 +478,27 @@ async def mark_as_driver(
     if card:
         return redirect("/")
     flash(request, "Marked as done")
+    return redirect(safe_next(request.query_params.get("next")))
+
+
+@router.post("/potential-drivers/{potential_driver_id}/undo")
+async def undo_driver(
+    request: Request, session: Session, user: CurrentUser, potential_driver_id: int
+):
+    """Take back a mis-tapped "Done", from the dashboard card or the admin page."""
+    card = is_card_request(request)
+    try:
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.undo_driver(session, pd, user, settings.now())
+        await session.commit()
+    except DutyError as e:
+        flash(request, str(e), "error")
+        if card:
+            return Response(headers={"HX-Refresh": "true"})
+        return redirect(safe_next(request.query_params.get("next")))
+    if card:
+        return redirect("/")
+    flash(request, "Undone: the duty is open again")
     return redirect(safe_next(request.query_params.get("next")))
 
 
@@ -583,6 +703,10 @@ async def stats(request: Request, session: Session, user: CurrentUser):
             if s.user_id in by_id
         ],
         heroes_month=dishwasher.next_month(today),
+        you={
+            "points": {d: points[d].get(user.id, 0) for d in Duty},
+            "strikes": active.get(user.id, 0),
+        },
     )
 
 
@@ -590,12 +714,13 @@ async def stats(request: Request, session: Session, user: CurrentUser):
 
 
 @router.get("/help")
-async def help_page(request: Request, user: CurrentUser):
+async def help_page(request: Request, session: Session, user: CurrentUser):
     """How the duties work, for new residents."""
     return render(
         request,
         "help.html",
         user,
+        floor_speakers=[u for u in await users.list_users(session) if u.is_admin],
         kitchen_people=settings.kitchen_people_per_day,
         trash_people=settings.trash_people_per_week,
         deadline_hour=settings.deadline_hour,
@@ -606,6 +731,7 @@ async def help_page(request: Request, user: CurrentUser):
 @router.get("/admin")
 async def admin(request: Request, session: Session, user: AdminUser):
     """admin page: residents, strikes and recent duties."""
+    now = settings.now()
     all_users = await users.list_users(session)
     since = settings.today() - timedelta(days=14)
     trips = await session.scalars(
@@ -633,9 +759,12 @@ async def admin(request: Request, session: Session, user: AdminUser):
         user,
         users=all_users,
         trips=list(trips),
+        # Duties that ended before this are folded away under "earlier days".
+        fold_before=settings.today() - timedelta(days=7),
         strikes=list(all_strikes),
         aways=list(aways),
         dishwasher_clears=await dishwasher.clears_in_month(session, settings.today()),
+        can_undo=lambda pd: duties.can_undo(pd, user, now),
     )
 
 
@@ -763,6 +892,31 @@ async def admin_issue_strike(
     return redirect("/admin")
 
 
+@router.post("/admin/aways")
+async def admin_add_away(
+    request: Request,
+    session: Session,
+    user: AdminUser,
+    user_id: Annotated[str, Form()],
+    start_date: Annotated[date, Form()],
+    end_date: Annotated[date, Form()],
+):
+    """Enter an away period for a resident (who told the floor speaker in person)."""
+    if not user_id.isdecimal():
+        flash(request, "Choose who is away", "error")
+        return redirect("/admin")
+    target = await _get_user(session, int(user_id))
+    name = target.display_name
+    try:
+        await users.add_away(session, target, start_date, end_date, settings.today())
+        await session.commit()
+    except UserError as e:
+        flash(request, str(e), "error")
+        return redirect("/admin")
+    flash(request, f"Away period added for {name}")
+    return redirect("/admin")
+
+
 @router.post("/admin/strikes/{strike_id}/revoke")
 async def admin_revoke_strike(request: Request, session: Session, user: AdminUser, strike_id: int):
     """Take a strike back."""
@@ -785,6 +939,21 @@ async def admin_excuse(
         await duties.excuse(session, pd, user, settings.now())
         await session.commit()
         flash(request, "Duty excused")
+    except DutyError as e:
+        flash(request, str(e), "error")
+    return redirect("/admin")
+
+
+@router.post("/admin/potential-drivers/{potential_driver_id}/keep-missed")
+async def admin_keep_missed(
+    request: Request, session: Session, user: AdminUser, potential_driver_id: int
+):
+    """Leave a missed duty as it is (the strike stays) and take it off "Needs attention"."""
+    try:
+        pd = await duties.get_potential_driver(session, potential_driver_id)
+        await duties.keep_missed(session, pd, user, settings.now())
+        await session.commit()
+        flash(request, "Kept as missed, the strike stays")
     except DutyError as e:
         flash(request, str(e), "error")
     return redirect("/admin")

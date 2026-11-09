@@ -1,9 +1,253 @@
 {% extends "base.html" %}
 {% block title %}Floor speaker – {{ super() }}{% endblock %}
+{# The message after an action shows in the sticky jump bar, under its links, so it never
+   covers them and the counts stay in view. #}
+{% block messages %}{% endblock %}
 {% block content %}
+{# The most frequent tasks first (duties, strikes), the residents' accounts last. Each
+   section scrolls back into view after one of its forms was sent (hx-swap "show"), so the
+   floor speaker doesn't land at the top of the long page every time. #}
+{% macro name(u) %}{{ u.display_name if u else "the former resident" }}{% endmacro %}
+{% macro when(trip) %}{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% endmacro %}
+{# The buttons for one person on a duty: Done while nobody has, Undo for a moment after,
+   Dispute a done one, Excuse an open or missed one, and (with `keep`, in "Needs attention")
+   Keep missed to leave a missed one as it is. #}
+{% macro duty_actions(pd, trip, keep=false) %}
+  {%- set what = trip.duty.label|lower ~ " on " ~ when(trip) %}
+  {%- if not trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
+    <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
+      <button class="secondary">Done</button></form>
+  {%- endif %}
+  {%- if can_undo(pd) %}
+    <form method="post" action="/potential-drivers/{{ pd.id }}/undo?next=/admin" class="inline">
+      <button class="secondary">Undo</button></form>
+  {%- endif %}
+  {%- if pd.status == Status.drove %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
+          hx-confirm="Dispute {{ name(pd.user) }}'s {{ what }}? They lose the credit and get a strike.">
+      <button class="danger">Dispute</button></form>
+  {%- endif %}
+  {%- if pd.status in (Status.pending, Status.missed) %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline"
+          hx-confirm="Excuse {{ name(pd.user) }}'s {{ what }}? {{ "No credit. Their strike for it is taken back." if pd.status == Status.missed else "No strike, no credit." }}">
+      <button class="secondary">Excuse</button></form>
+  {%- endif %}
+  {%- if keep and pd.status == Status.missed %}
+    <form method="post" action="/admin/potential-drivers/{{ pd.id }}/keep-missed" class="inline">
+      <button class="secondary">Keep missed</button></form>
+  {%- endif %}
+{%- endmacro %}
+{% set all_pds = trips|map(attribute="potential_drivers")|sum(start=[]) %}
+{% set todo = all_pds|selectattr("status", "in", [Status.pending, Status.missed])|list %}
+{% set active_strikes = strikes|rejectattr("revoked_at")|rejectattr("redeemed_by_trip_id")|list %}
+{% set old_strikes = strikes|reject("in", active_strikes)|list %}
+{# Overdue: missed (not disputed, not kept as missed), a strike was given, a decision is
+   needed. Still open: not marked yet but in time; a duty that hasn't started (a coming
+   penalty week) isn't. #}
+{% set overdue = [] %}
+{% set open_now = [] %}
+{% for trip in trips %}{% for pd in trip.potential_drivers %}
+  {% if pd.status == Status.missed and not pd.disputed_at and not pd.kept_missed_at %}{% set _ = overdue.append((trip, pd)) %}
+  {% elif pd.status == Status.pending and trip.start_date <= today %}{% set _ = open_now.append((trip, pd)) %}{% endif %}
+{% endfor %}{% endfor %}
+{% set waiting = overdue + open_now %}
+{% set near = [] %}
+{% for u in users %}
+  {% set n = active_strikes|selectattr("user_id", "equalto", u.id)|list|length %}
+  {% if n >= strike_threshold - 1 %}{% set _ = near.append((u, n)) %}{% endif %}
+{% endfor %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
+<div class="jump" role="navigation" aria-label="Sections">
+  <a href="#attention">Needs attention <span class="muted">{{ waiting|length + near|length }}</span></a>
+  <a href="#duties">Duties <span class="muted">{{ todo|length }}<span class="wide-only"> open or missed</span></span></a>
+  <a href="#strikes">Strikes <span class="muted">{{ active_strikes|length }}<span class="wide-only"> active</span></span></a>
+  <a href="#absences">Absences <span class="muted">{{ aways|length }}</span></a>
+  <a href="#dishwasher">Dishwasher <span class="muted">{{ dishwasher_clears|length }}</span></a>
+  <a href="#residents">Residents <span class="muted">{{ users|selectattr("active")|list|length }}<span class="wide-only"> active</span></span></a>
+  {% for kind, msg in messages %}<div class="flash {{ kind }}" role="status">{{ msg }}</div>{% endfor %}
+</div>
 
-<section class="card">
+<section class="card" id="attention" hx-swap="innerHTML show:#attention:top">
+  <h2>Needs attention</h2>
+  {% if not waiting and not near %}<p class="muted">Nothing needs attention.</p>{% endif %}
+  {% macro attention_list(title, rows, note, keep=false) %}
+    <h3>{{ title }}</h3>
+    <div class="table-wrap"><table class="trips attention">
+      <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+      <thead><tr><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+      {% for trip, pd in rows %}
+        <tbody class="trip"><tr>
+          <td rowspan="1">{{ when(trip) }}, {{ trip.duty.label|replace(" duty", "")|lower }}</td>
+          <td>{{ person(pd.user) }}{% if note %} <span class="muted">{{ note }}</span>{% endif %}</td>
+          <td>{% include "partials/status.html" %}</td>
+          <td class="end">{{ duty_actions(pd, trip, keep) }}</td>
+        </tr></tbody>
+      {% endfor %}
+    </table></div>
+  {% endmacro %}
+  {% if overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", overdue, "strike given", keep=true) }}{% endif %}
+  {% if open_now %}{{ attention_list("Still open – in time, nothing to do yet", open_now, none) }}{% endif %}
+  {% if near %}
+    {# One strike or less before a penalty week. #}
+    <h3>Close to a penalty week</h3>
+    <ul class="near">
+      {% for u, n in near %}<li>{{ person(u) }} <a href="#strikes">{{ n }} of {{ strike_threshold }} strikes</a></li>{% endfor %}
+    </ul>
+  {% endif %}
+</section>
+
+<section class="card" id="duties" hx-swap="innerHTML show:#duties:top">
+  <h2>Duties <span class="muted">last 14 days</span></h2>
+  {# One table per duty: the last 7 days in view, the week before folded away under a count
+     (the same columns, so both line up). #}
+  {% macro trip_table(list) %}
+  <div class="table-wrap"><table class="trips">
+    <colgroup><col class="col-date"><col><col class="col-status"><col class="col-action"></colgroup>
+    <thead><tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"></th></tr></thead>
+    {% for trip in list %}
+      <tbody class="trip">
+      {% for pd in trip.potential_drivers %}
+        <tr>
+          {% if loop.first %}
+          <td rowspan="{{ loop.length }}">{{ when(trip) }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}
+            {% if trip.is_penalty %}<span class="penalty">(penalty)</span>{% endif %}</td>
+          {% endif %}
+          <td>{{ person(pd.user) }}{% if pd.status == Status.missed and pd.kept_missed_at %} <span class="muted">kept missed</span>{% endif %}</td>
+          <td>{% include "partials/status.html" %}</td>
+          <td class="end">{{ duty_actions(pd, trip) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    {% else %}
+      <tbody><tr><td class="muted" colspan="4">No duties in this period.</td></tr></tbody>
+    {% endfor %}
+  </table></div>
+  {% endmacro %}
+  {% for duty in Duty %}
+  {% set mine = trips|selectattr("duty", "equalto", duty)|list %}
+  {% set earlier = mine|selectattr("end_date", "<=", fold_before)|list %}
+  <h3>{{ duty.label }}</h3>
+  {{ trip_table(mine|reject("in", earlier)|list) }}
+  {% if earlier %}
+    <details class="older">
+      <summary>{{ earlier|length }} earlier {{ ("day" if duty == Duty.kitchen else "week") ~ ("" if earlier|length == 1 else "s") }}</summary>
+      {{ trip_table(earlier) }}
+    </details>
+  {% endif %}
+  {% endfor %}
+
+  <form method="post" action="/admin/tick" class="actions"
+        hx-confirm="Run the daily job now? It marks overdue duties missed (with their strikes) and assigns today's duties. It changes nothing that's already done.">
+    <button class="secondary">Run daily job now</button>
+    <span class="muted">Runs by itself every day at {{ "%02d"|format(deadline_hour) }}:05.</span>
+  </form>
+</section>
+
+{% macro strike_rows(list) %}
+  {% for s in list %}
+    <tr{% if s.revoked_at or s.redeemed_by_trip_id %} class="muted"{% endif %}>
+      <td>{{ s.created_at|date_time }}</td>
+      <td>{{ person(s.user) }}</td>
+      <td>{{ s.reason }}{% if s.redeemed_by_trip_id and not s.revoked_at %} <span class="tag">penalty week</span>{% endif %}</td>
+      <td>{{ "automatic" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
+      <td class="end">
+        {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
+        {% else %}
+          <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline"
+                hx-confirm="Revoke {{ name(s.user) }}'s strike from {{ s.created_at|date_time }}?{% if s.redeemed_by_trip_id %} If its penalty week hasn't been served yet, that week is cancelled and the other strikes count again.{% endif %}">
+            <button class="secondary">Revoke</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+{% endmacro %}
+<section class="card" id="strikes" hx-swap="innerHTML show:#strikes:top">
+  <h2>Strikes <span class="muted">{{ active_strikes|length }} active</span></h2>
+  <form method="post" action="/admin/strikes" class="row fill"
+        hx-on:htmx:confirm="event.preventDefault();
+          const who = this.user_id.selectedOptions[0]?.text || 'this resident';
+          if (confirm(`Give ${who} a strike: “${this.reason.value}”? With {{ strike_threshold }} active strikes a penalty week follows right away.`)) event.detail.issueRequest();">
+    <label>Resident
+      <select name="user_id" required>
+        <option value="">Choose resident…</option>
+        {% for u in users %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="grow">Reason <input name="reason" required></label>
+    <button class="danger">Give strike</button>
+  </form>
+  {# Fixed columns, so the active and the older strikes line up under each other. #}
+  {% set head %}<colgroup><col class="col-date"><col class="col-who"><col><col class="col-by"><col class="col-action"></colgroup>
+    <tr><th>Date</th><th>Resident</th><th>Reason</th><th>By</th><th class="end">Status</th></tr>{% endset %}
+  {# An empty list is a plain sentence, like "Nothing needs attention.", not a bare header. #}
+  {% if active_strikes %}
+    <div class="table-wrap"><table class="strike-list">{{ head }}{{ strike_rows(active_strikes) }}</table></div>
+  {% else %}<p class="muted">No active strikes.</p>{% endif %}
+  {% if old_strikes %}
+    <details class="older">
+      <summary>{{ old_strikes|length }} revoked or used</summary>
+      <div class="table-wrap"><table class="strike-list">{{ head }}{{ strike_rows(old_strikes) }}</table></div>
+    </details>
+  {% endif %}
+</section>
+
+<section class="card" id="absences" hx-swap="innerHTML show:#absences:top">
+  <h2>Absences <span class="muted">current and upcoming</span></h2>
+  {# For a resident who tells the floor speaker in person. #}
+  <form method="post" action="/admin/aways" class="row away-form">
+    <label>Resident
+      <select name="user_id" required>
+        <option value="">Choose resident…</option>
+        {% for u in users if u.active %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>From <input type="date" name="start_date" value="{{ today }}" required></label>
+    <label>To <input type="date" name="end_date" required></label>
+    <button>Add</button>
+  </form>
+  {% if aways %}
+  <div class="table-wrap"><table class="compact">
+    <tr><th>Resident</th><th>Dates</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+    {% for a in aways %}
+      <tr>
+        <td>{{ person(a.user) }}</td>
+        <td>{{ a.start_date|short_date }}–{{ a.end_date|long_date }}</td>
+        <td class="end">
+          <form method="post" action="/me/away/{{ a.id }}/delete?next=/admin" class="inline"
+                hx-confirm="Delete this absence of {{ a.user.first_name }}?">
+            <button class="secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">Nobody is away.</p>{% endif %}
+</section>
+
+<section class="card" id="dishwasher" hx-swap="innerHTML show:#dishwasher:top">
+  <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
+  {% if dishwasher_clears %}
+  <div class="table-wrap"><table class="compact">
+    <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+    {% for c in dishwasher_clears %}
+      <tr>
+        {# Only this month's entries (the heading names it), so no year. #}
+        <td><span class="nowrap">{{ c.cleared_at|local_date|short_date }}</span> {{ c.cleared_at|clock }}</td>
+        <td>{{ person(c.user) }}</td>
+        <td class="end">
+          <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"
+                hx-confirm="Delete {{ c.user.first_name ~ "'s" if c.user else "this" }} entry from {{ c.cleared_at|date_time }}? It won't count toward the heroes.">
+            <button class="secondary">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="muted">Nobody has emptied it this month yet.</p>{% endif %}
+</section>
+
+<section class="card" id="residents" hx-swap="innerHTML show:#residents:top">
   <h2>Residents <span class="muted">{{ users|selectattr("active")|list|length }} active</span></h2>
   <details class="add">
     <summary>Add resident</summary>
@@ -23,7 +267,7 @@
   {% for u in users %}
     <details class="resident{% if not u.active %} inactive{% endif %}">
       <summary>
-        {{ person(u) }} <span class="muted">{{ u.name }} · @{{ u.username }}</span>
+        {{ person(u) }} <span class="muted">{{ u.name }}<span class="sep">·</span>@{{ u.username }}</span>
         {% if u.is_admin %}<span class="tag tag-admin">floor speaker</span>{% endif %}
         {% if not u.active %}<span class="tag">inactive</span>{% endif %}
       </summary>
@@ -31,13 +275,14 @@
         <form method="post" action="/admin/users/{{ u.id }}/edit" class="row">
           <label>Name <input name="name" value="{{ u.name }}"></label>
           <label class="short">Room <input name="room_number" value="{{ u.room_number }}" pattern="[A-Za-z][0-9](0[1-9]|[1-9][0-9])" title="Letter, floor, room 01–99, e.g. E103"></label>
-          <label>New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
+          <label class="wide">New password <input name="password" minlength="{{ min_password_length }}" placeholder="unchanged"></label>
           <label class="check"><span><input type="checkbox" name="is_admin" value="true" {% if u.is_admin %}checked{% endif %}
                  {% if u.id == user.id %}disabled{% endif %}> Floor speaker</span></label>
           <button>Save</button>
         </form>
         <div class="actions">
-          <form method="post" action="/admin/users/{{ u.id }}/active" class="inline">
+          <form method="post" action="/admin/users/{{ u.id }}/active" class="inline"
+                {% if u.active %}hx-confirm="Pause {{ u.display_name }}? They won't get duties until you activate them again."{% endif %}>
             <button class="secondary">{{ "Deactivate" if u.active else "Activate" }}</button>
           </form>
           {% if u.id != user.id %}
@@ -50,116 +295,5 @@
       </div>
     </details>
   {% endfor %}
-</section>
-
-<section class="card">
-  <h2>Absences <span class="muted">current and upcoming</span></h2>
-  <div class="table-wrap"><table>
-    <tr><th>Resident</th><th>From</th><th>To</th><th class="end"><span class="sr-only">Actions</span></th></tr>
-    {% for a in aways %}
-      <tr>
-        <td>{{ person(a.user) }}</td>
-        <td>{{ a.start_date|long_date }}</td>
-        <td>{{ a.end_date|long_date }}</td>
-        <td class="end">
-          <form method="post" action="/me/away/{{ a.id }}/delete?next=/admin" class="inline"
-                hx-confirm="Delete this absence of {{ a.user.first_name }}?">
-            <button class="secondary">Delete</button>
-          </form>
-        </td>
-      </tr>
-    {% else %}<tr><td class="muted" colspan="4">Nobody is away.</td></tr>{% endfor %}
-  </table></div>
-</section>
-
-<section class="card">
-  <h2>Strikes</h2>
-  <form method="post" action="/admin/strikes" class="row"
-        hx-confirm="Give this strike? With {{ strike_threshold }} active strikes a penalty week follows right away.">
-    <label>Resident
-      <select name="user_id" required>
-        <option value="">Choose resident…</option>
-        {% for u in users %}<option value="{{ u.id }}">{{ u.display_name }}</option>{% endfor %}
-      </select>
-    </label>
-    <label class="grow">Reason <input name="reason" required></label>
-    <button class="danger">Give strike</button>
-  </form>
-  <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Resident</th><th>Reason</th><th>By</th><th class="end">Status</th></tr>
-    {% for s in strikes %}
-      <tr{% if s.revoked_at or s.redeemed_by_trip_id %} class="muted"{% endif %}>
-        <td>{{ s.created_at|date_time }}</td>
-        <td>{{ person(s.user) }}</td>
-        <td>{{ s.reason }}</td>
-        <td>{{ "automatic" if s.auto else (person(s.issued_by) if s.issued_by else "–") }}</td>
-        <td class="end">
-          {% if s.revoked_at %}<span class="badge s-excused">revoked</span>
-          {% else %}
-            {% if s.redeemed_by_trip_id %}<span class="badge s-excused">penalty week</span>{% endif %}
-            <form method="post" action="/admin/strikes/{{ s.id }}/revoke" class="inline">
-              <button class="secondary">Revoke</button>
-            </form>
-          {% endif %}
-        </td>
-      </tr>
-    {% else %}<tr><td class="muted" colspan="5">No strikes.</td></tr>{% endfor %}
-  </table></div>
-</section>
-
-<section class="card">
-  <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
-  <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
-    {% for c in dishwasher_clears %}
-      <tr>
-        <td>{{ c.cleared_at|date_time }}</td>
-        <td>{{ person(c.user) }}</td>
-        <td class="end">
-          <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"
-                hx-confirm="Delete {{ c.user.first_name ~ "'s" if c.user else "this" }} entry from {{ c.cleared_at|date_time }}? It won't count toward the heroes.">
-            <button class="secondary">Delete</button>
-          </form>
-        </td>
-      </tr>
-    {% else %}<tr><td class="muted" colspan="3">Nobody has emptied it this month yet.</td></tr>{% endfor %}
-  </table></div>
-</section>
-
-<section class="card">
-  <h2>Duties <span class="muted">last 14 days and planned</span></h2>
-  <div class="table-wrap"><table>
-    <tr><th>Date</th><th>Duty</th><th>Resident</th><th>Status</th><th class="end"></th></tr>
-    {% for trip in trips %}
-      {% set driven = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|list %}
-      {% for pd in trip.potential_drivers %}
-        <tr>
-          <td>{{ trip.start_date|weekday }} {{ trip.start_date|short_date }}{% if trip.end_date != trip.start_date %}–{{ trip.end_date|short_date }}{% endif %}</td>
-          <td>{{ trip.duty.label }}{% if trip.is_penalty %} <span class="penalty">(penalty)</span>{% endif %}</td>
-          <td>{{ person(pd.user) }}</td>
-          <td>{% include "partials/status.html" %}</td>
-          <td class="end">
-            {% if not driven %}
-              <form method="post" action="/potential-drivers/{{ pd.id }}/drove?next=/admin" class="inline">
-                <button class="secondary">Done</button></form>
-            {% endif %}
-            {% if pd.status == Status.drove %}
-              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/dispute?next=/admin" class="inline"
-                    hx-confirm="Marked done but not actually done? Gives a strike.">
-                <button class="danger">Dispute</button></form>
-            {% endif %}
-            {% if pd.status in (Status.pending, Status.missed) %}
-              <form method="post" action="/admin/potential-drivers/{{ pd.id }}/excuse" class="inline">
-                <button class="secondary">Excuse</button></form>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    {% endfor %}
-  </table></div>
-
-  <form method="post" action="/admin/tick" class="actions">
-    <button class="secondary">Run daily job now</button>
-  </form>
 </section>
 {% endblock %}

@@ -184,3 +184,36 @@ async def delete_clear(
         )
     await session.delete(clear)
     await session.flush()
+
+
+# How long whoever marked an emptying can take it back (a mis-tap), see `undo_clear`.
+UNDO_MINUTES = 10
+
+
+def can_undo_clear(clear: DishwasherClear, user: User, now: datetime) -> bool:
+    """Whether `user` may take back `clear` now: only their own, within `UNDO_MINUTES`, and
+    not once a new month has begun (the old one may have decided the heroes)."""
+    start, _ = month_window(now.date())
+    return (
+        clear.user_id == user.id
+        and now - clear.cleared_at <= timedelta(minutes=UNDO_MINUTES)
+        and clear.cleared_at >= start
+    )
+
+
+async def undo_clear(
+    session: AsyncSession, clear: DishwasherClear, user: User, now: datetime
+) -> None:
+    """Take back a mis-tapped emptying: it no longer counts, and the next one can be marked
+    right away.
+
+    Raises:
+        DishwasherError: if `user` may not (any more), see `can_undo_clear`.
+    """
+    if not can_undo_clear(clear, user, now):
+        raise DishwasherError(
+            f"An emptying can only be taken back within {UNDO_MINUTES} minutes, by whoever "
+            "marked it"
+        )
+    await session.delete(clear)
+    await session.flush()

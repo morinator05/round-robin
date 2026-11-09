@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import html
 import json
 import random
 import re
@@ -18,7 +19,7 @@ from starlette.routing import Route
 
 from app import web
 from app.config import settings
-from app.formatting import long_date
+from app.formatting import long_date, short_date
 from app.main import app
 from app.models import (
     AwayPeriod,
@@ -262,6 +263,63 @@ async def test_preview_has_one_plan_per_open_potential_driver(session):
     after = await plans()
     assert list(after) == [None]
     assert after[None] == before[p1.id]
+
+
+async def test_undo_reopens_the_trip_for_everyone(session):
+    people = await make_users(session)
+    _, first, second, p1, p2 = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+
+    await duties.undo_driver(session, first, p1, at(MONDAY, 20) + timedelta(minutes=9))
+    assert first.status is second.status is Status.pending
+    assert first.completed_at is None and first.completed_by_id is None
+    # Open again: either of them can mark it, and the preview has a plan per person again.
+    assert duties.can_mark_as_driver(second, p2, at(MONDAY, 21))
+    preview = await duties.preview(
+        session, Duty.kitchen, MONDAY + timedelta(days=1), MONDAY + timedelta(days=14), MONDAY
+    )
+    assert set(preview.plans) == {p1.id, p2.id}
+
+
+async def test_undo_is_only_for_a_short_while_and_for_whoever_marked_it(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, p2 = await kitchen_pair(session, people)
+    marked = at(MONDAY, 20)
+    await duties.mark_as_driver(session, first, p1, marked)
+
+    late = marked + timedelta(minutes=duties.UNDO_MINUTES + 1)
+    assert not duties.can_undo(first, p1, late)
+    with pytest.raises(DutyError):
+        await duties.undo_driver(session, first, p1, late)
+    # Not the partner, who didn't mark it; the floor speaker may.
+    assert not duties.can_undo(first, p2, marked + timedelta(minutes=1))
+    assert duties.can_undo(first, admin, marked + timedelta(minutes=1))
+
+
+async def test_no_undo_after_the_deadline(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    deadline = duties.deadline(first.trip)
+    await duties.mark_as_driver(session, first, p1, deadline - timedelta(minutes=2))
+    assert not duties.can_undo(first, p1, deadline)
+    assert not duties.can_undo(first, admin, deadline + timedelta(minutes=1))
+
+
+async def test_no_undo_of_a_disputed_trip(session):
+    people = await make_users(session)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, second, p1, p2 = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await duties.dispute(session, first, admin, at(MONDAY, 20) + timedelta(minutes=1))
+    # The admin marks the partner as the one who cleaned; that can't be undone (a strike is
+    # involved on this trip).
+    await duties.mark_as_driver(session, second, admin, at(MONDAY, 20) + timedelta(minutes=2))
+    assert not duties.can_undo(second, admin, at(MONDAY, 20) + timedelta(minutes=3))
 
 
 async def test_day_is_chosen_only_after_the_previous_deadline(session):
@@ -1246,7 +1304,9 @@ async def test_dashboard_switches_between_plans(session, client, midday):
     await client.post("/logout")
     await login(client, p2.username)
     assert current((await client.get("/?cleaner=999")).text) == [str(p2.id)]
-    assert "If you clean" in (await client.get("/")).text
+    page = (await client.get("/")).text
+    # The buttons only switch the preview; they don't report anything.
+    assert "Plan if you clean" in page and "only changes the preview" in page
     # Anything that isn't an id falls back too, instead of an error page.
     r = await client.get("/?cleaner=abc")
     assert r.status_code == 200 and current(r.text) == [str(p2.id)]
@@ -1285,6 +1345,150 @@ async def test_done_on_the_card_updates_card_and_preview(session, client):
     # htmx follows to the dashboard and takes the card and the previews from it.
     assert r.status_code == 200 and 'id="card-kitchen"' in r.text
     assert 'id="kitchen-preview"' in r.text and "The plan depends on" not in r.text
+
+
+def you_line(page: str) -> str:
+    """The "you" summary at the top of the dashboard, whitespace collapsed."""
+    return " ".join(page.split('id="you"')[1].split("</p>")[0].split())
+
+
+async def test_dashboard_says_what_you_have_to_do(session, client, monkeypatch):
+    # Noon: before the deadline hour the dashboard would still show yesterday's duty.
+    monkeypatch.setattr(type(settings), "now", lambda self: at(MONDAY, 12))
+    people = await make_users(session, n=6)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    trash = await duties.get_trip(session, Duty.trash, settings.today())
+    busy = {p1.id, p2.id} | {pd.user_id for pd in trash.potential_drivers}
+    outsider = next(p for p in people if p.id not in busy and not p.is_admin)
+
+    await login(client, p1.username)
+    page = (await client.get("/")).text
+    line = you_line(page)
+    assert "You're on kitchen duty today" in line
+    # The card says what to do and by when, to the pair.
+    assert "Only one of you needs to clean" in page and "taps “I cleaned it” before" in page
+    # Your own button says what it means; it isn't the "done" status word.
+    assert ">I cleaned it</button>" in page and ">Done</button>" not in page
+    assert "New here?" not in line
+
+    await client.post("/logout")
+    await login(client, outsider.username)
+    page = (await client.get("/")).text
+    line = you_line(page)
+    assert "You're free today" in line and "Next kitchen:" in line and "Next trash:" in line
+    assert "strike" not in line
+    # Someone who has never been on a duty gets pointed to the explanation.
+    assert "New here?" in line and 'href="/help"' in line
+    assert "Only one of them needs to clean" in page
+
+    await strikes.issue(session, user_id=outsider.id, reason="test", today=settings.today())
+    await session.commit()
+    line = you_line((await client.get("/")).text)
+    assert f"1 of {settings.strike_threshold} strikes" in line and 'href="/me"' in line
+    # What happens at the limit, right there.
+    assert f"at {settings.strike_threshold}: an extra trash week" in line
+
+    # After cleaning: thanks, also when you're on trash duty this week as well.
+    await client.post("/logout")
+    await login(client, p1.username)
+    mine = first if first.user_id == p1.id else second
+    await client.post(f"/potential-drivers/{mine.id}/drove")
+    assert "You did kitchen duty today – thanks!" in you_line((await client.get("/")).text)
+
+
+async def test_dashboard_at_night_talks_about_yesterday_and_today(session, client, monkeypatch):
+    """Before the deadline hour the card still shows yesterday's duty; the "you" line must
+    say so plainly, and call the duty that starts later today "today"."""
+    people = await make_users(session, n=6)
+    _, first, _, p1, p2 = await kitchen_pair(session, people)
+    tuesday = MONDAY + timedelta(days=1)
+    monkeypatch.setattr(type(settings), "now", lambda self: at(tuesday, 3))
+
+    await login(client, p1.username)
+    line = you_line((await client.get("/")).text)
+    assert "Your kitchen duty from yesterday is still open" in line and "by 08:00" in line
+    assert "duty yesterday." not in line
+
+    # Someone outside the pair who is up today (from the deadline hour on).
+    preview = await duties.preview(
+        session, Duty.kitchen, tuesday, tuesday + timedelta(days=14), tuesday
+    )
+    plan = next(iter(preview.plans.values()))
+    up_today = next(
+        p for p in people if p.id in plan[0].potential_drivers and p.id not in {p1.id, p2.id}
+    )
+    await client.post("/logout")
+    await login(client, up_today.username)
+    line = you_line((await client.get("/")).text)
+    words = re.sub(r"<[^>]+>", "", line)
+    assert f"Next kitchen: today from {settings.deadline_hour:02d}:05" in words
+    # The earliest outcome first, and what it depends on; the other one after "otherwise".
+    other = next(
+        (e for e in list(preview.plans.values())[1] if up_today.id in e.potential_drivers), None
+    )
+    if other and other.start != tuesday:
+        assert " cleans, otherwise " in words
+    # The card says when today's duty comes.
+    page = html.unescape(text(await client.get("/")))
+    assert f"Today's kitchen duty is assigned at {settings.deadline_hour:02d}:05" in page
+
+
+async def test_next_kitchen_says_with_whom(session, client, midday):
+    people = await make_users(session, n=6)
+    _, first, _, p1, _ = await kitchen_pair(session, people, settings.today())
+    await duties.mark_as_driver(session, first, p1, settings.now())
+    await session.commit()
+    today = settings.today()
+    preview = await duties.preview(
+        session, Duty.kitchen, today + timedelta(days=1), today + timedelta(days=14), today
+    )
+    entry = preview.plans[None][0]
+    me, partner = (next(p for p in people if p.id == uid) for uid in entry.potential_drivers)
+    await login(client, me.username)
+    words = re.sub(r"<[^>]+>", "", you_line((await client.get("/")).text))
+    assert f"with Person {partner.room_number}" in words
+
+
+async def test_undo_on_the_card(session, client, monkeypatch):
+    monkeypatch.setattr(type(settings), "now", lambda self: at(MONDAY, 12))
+    people = await make_users(session, n=6)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await login(client, p1.username)
+    card = {"HX-Request": "true"}
+    page = (
+        await client.post(
+            f"/potential-drivers/{first.id}/drove?card=1", headers=card, follow_redirects=True
+        )
+    ).text
+    undo = f'hx-post="/potential-drivers/{first.id}/undo?card=1"'
+    assert undo in page
+    r = await client.post(
+        f"/potential-drivers/{first.id}/undo?card=1", headers=card, follow_redirects=True
+    )
+    # Open again: the Done buttons are back and the plan depends on who cleans again.
+    assert undo not in r.text and f"/potential-drivers/{first.id}/drove?card=1" in r.text
+    assert "The plan depends on" in r.text
+
+    # The partner sees no Undo for someone else's Done, and can't undo it.
+    await client.post(f"/potential-drivers/{first.id}/drove?card=1", headers=card)
+    await client.post("/logout")
+    await login(client, p2.username)
+    assert undo not in (await client.get("/")).text
+    r = await client.post(f"/potential-drivers/{first.id}/undo?card=1", headers=card)
+    assert r.headers["HX-Refresh"] == "true"
+
+
+async def test_admin_can_undo_a_done_on_the_admin_page(session, client):
+    people = await make_users(session, n=6)
+    _, first, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    await client.post(f"/potential-drivers/{first.id}/drove?next=/admin")
+    undo = f'action="/potential-drivers/{first.id}/undo?next=/admin'
+    assert undo in (await client.get("/admin")).text
+    r = await client.post(f"/potential-drivers/{first.id}/undo?next=/admin")
+    assert r.status_code == 303
+    page = (await client.get(r.headers["location"])).text
+    assert "Undone: the duty is open again" in page and undo not in page
 
 
 async def test_preview_with_one_driver_left_has_no_switch(session):
@@ -1562,6 +1766,312 @@ async def test_login_is_limited_per_account_across_ips(session, monkeypatch):
         assert "Too many failed attempts" in (await c.get(r.headers["location"])).text
 
 
+async def test_admin_enters_an_absence_for_a_resident(session, client):
+    people = await make_users(session, n=4)
+    resident = people[2]
+    later = settings.today() + timedelta(days=5)
+    form = {
+        "user_id": str(resident.id),
+        "start_date": later.isoformat(),
+        "end_date": (later + timedelta(days=2)).isoformat(),
+    }
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    assert 'action="/admin/aways"' in page
+    r = await client.post("/admin/aways", data=form)
+    assert r.status_code == 303 and r.headers["location"] == "/admin"
+    assert f"Away period added for {resident.display_name}" in (await client.get("/admin")).text
+    assert await session.scalar(select(AwayPeriod.user_id)) == resident.id
+
+    # A wrong period comes back as a message.
+    await client.post("/admin/aways", data={**form, "end_date": settings.today().isoformat()})
+    assert "The end can't be before the start" in html.unescape((await client.get("/admin")).text)
+
+    # Residents can't enter absences for others.
+    await client.post("/logout")
+    await login(client, "p2")
+    assert (await client.post("/admin/aways", data=form)).status_code == 403
+
+
+async def test_admin_page_has_the_frequent_tasks_first(session, client):
+    people = await make_users(session, n=4)
+    _, first, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    sections = ["duties", "strikes", "absences", "dishwasher", "residents"]
+    positions = [page.index(f'<section class="card" id="{s}"') for s in sections]
+    assert positions == sorted(positions)
+    # A jump bar at the top, with what's waiting: today's kitchen pair and trash person.
+    jump = page.split('class="jump"')[1].split("</div>")[0]
+    # Not a <nav>: that would get the look of the main menu bar.
+    assert '<nav class="jump"' not in page
+    assert all(f'href="#{s}"' in jump for s in sections)
+    assert "3 open" in re.sub(r"<[^>]+>", "", jump)
+    assert "last 14 days</span>" in page and "and planned" not in page
+    assert "Runs by itself every day at" in page
+
+
+async def test_admin_sees_what_needs_attention(session, client, midday):
+    people = await make_users(session, n=4)
+    await login(client, "p1")
+    # Nothing yet: says so.
+    assert "Nothing needs attention." in (await client.get("/admin")).text
+
+    # Yesterday's kitchen duty nobody marked (missed by now), and today's (still open).
+    _, late1, late2, _, _ = await kitchen_pair(
+        session, people, settings.today() - timedelta(days=1)
+    )
+    _, first, second, _, _ = await kitchen_pair(session, people, settings.today())
+    trash = await duties.get_trip(session, Duty.trash, settings.today())
+    for _ in range(settings.strike_threshold - 1):
+        await strikes.issue(session, user_id=people[3].id, reason="x", today=settings.today())
+    await session.commit()
+    page = html.unescape((await client.get("/admin")).text)
+    block = page.split('id="attention"')[1].split("</section>")[0]
+    # Two lists: overdue (a decision is needed, a strike was given) and still open in time.
+    overdue = block.split("Overdue")[1].split("Still open")[0]
+    still_open = block.split("Still open")[1]
+    for pd in [late1, late2]:
+        assert f"/admin/potential-drivers/{pd.id}/excuse" in overdue
+        assert f"/admin/potential-drivers/{pd.id}/excuse" not in still_open
+    assert "strike given" in overdue and "Their strike for it is taken back" in overdue
+    for pd in [first, second, *trash.potential_drivers]:
+        assert f"/admin/potential-drivers/{pd.id}/excuse" in still_open
+        assert f"/potential-drivers/{pd.id}/drove?next=/admin" in still_open
+    assert "No strike, no credit" in still_open
+    # The daily job says what it does before it runs.
+    assert 'hx-confirm="Run the daily job now? It marks overdue duties missed' in page
+    # Its own small list, one resident per entry, instead of a run-on sentence.
+    near = block.split("<h3>Close to a penalty week</h3>")[1]
+    assert f"{people[3].room_number}</span>" in near and 'href="#strikes">2 of 3 strikes' in near
+    assert "Nothing needs attention." not in block
+    jump = page.split('class="jump"')[1].split("</div>")[0]
+    assert 'href="#attention"' in jump
+
+
+def test_date_time_only_wraps_before_the_time():
+    # In a narrow table column the date stays on one line and the time goes to the next,
+    # never "5 Nov / 2026 / 21:30".
+    moment = datetime(2026, 11, 5, 21, 30, tzinfo=settings.tz)
+    assert web.templates.env.filters["date_time"](moment) == "5 Nov 2026 21:30"
+
+
+async def test_used_strike_says_penalty_week_next_to_its_reason(session, client):
+    people = await make_users(session, n=4)
+    for i in range(settings.strike_threshold):
+        await strikes.issue(session, user_id=people[2].id, reason=f"r{i}", today=settings.today())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    section = html.unescape(page.split('id="strikes"')[1].split("</section>")[0])
+    used = section.split('<details class="older">')[1].split("</details>")[0]
+    row = used.split("<td>r0")[1].split("</tr>")[0]
+    reason, status = row.split('<td class="end">')
+    # The label sits with the reason, so the status column only ever holds one button or
+    # tag and both strike tables keep the same columns.
+    assert '<span class="tag">penalty week</span>' in reason
+    assert 'class="tag">penalty week' not in status and "Revoke" in status
+    # Revoking a used strike says what happens to its penalty week; an active one doesn't.
+    assert "that week is cancelled and the other strikes count again" in status
+    await strikes.issue(session, user_id=people[3].id, reason="solo", today=settings.today())
+    await session.commit()
+    page = html.unescape((await client.get("/admin")).text)
+    active = page.split("<td>solo")[1].split("</tr>")[0]
+    assert "Revoke" in active and "cancelled" not in active
+
+
+async def test_keep_missed_takes_it_off_needs_attention(session, client, midday):
+    people = await make_users(session, n=4)
+    # Yesterday's kitchen duty nobody marked: missed by now, with a strike each.
+    _, late, other, late_user, _ = await kitchen_pair(
+        session, people, settings.today() - timedelta(days=1)
+    )
+    await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = html.unescape((await client.get("/admin")).text)
+    overdue = page.split('id="attention"')[1].split("Still open")[0]
+    keep = f'action="/admin/potential-drivers/{late.id}/keep-missed"'
+    assert keep in overdue and ">Keep missed</button>" in overdue
+    # Only in the list that asks for a decision, not on every line of the duties table.
+    duties_block = page.split('id="duties"')[1].split("</section>")[0]
+    assert "keep-missed" not in duties_block
+    count = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
+
+    r = await client.post(f"/admin/potential-drivers/{late.id}/keep-missed")
+    assert r.status_code == 303 and r.headers["location"] == "/admin"
+    page = html.unescape((await client.get("/admin")).text)
+    assert "Kept as missed, the strike stays" in page
+    block = page.split('id="attention"')[1].split("</section>")[0]
+    assert f"/admin/potential-drivers/{late.id}/" not in block
+    assert f"/admin/potential-drivers/{other.id}/keep-missed" in block
+    # Still in the duties table, where it can be marked done or excused after all, and
+    # marked as decided there.
+    duties_block = page.split('id="duties"')[1].split("</section>")[0]
+    assert f"/admin/potential-drivers/{late.id}/excuse" in duties_block
+    late_row = duties_block.split(f"/admin/potential-drivers/{late.id}/excuse")[0]
+    late_row = late_row.rsplit("<tr>", 1)[1]
+    assert '<span class="muted">kept missed</span>' in late_row
+    other_row = duties_block.split(f"/admin/potential-drivers/{other.id}/excuse")[0]
+    assert "kept missed" not in other_row.rsplit("<tr>", 1)[1]
+    after = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
+    assert int(after.group(1)) == int(count.group(1)) - 1
+    # Nothing else changes: still missed, the strike stays.
+    await session.refresh(late)
+    assert late.status is Status.missed and late.kept_missed_at is not None
+    active = await session.scalar(
+        select(func.count())
+        .select_from(Strike)
+        .where(Strike.user_id == late_user.id, Strike.revoked_at.is_(None))
+    )
+    assert active == 1
+
+
+async def test_admin_folds_duties_older_than_a_week(session, client, midday):
+    people = await make_users(session, n=4)
+    old_day = settings.today() - timedelta(days=10)
+    await kitchen_pair(session, people, old_day)
+    _, today_pd, _, _, _ = await kitchen_pair(session, people, settings.today())
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    kitchen = page.split('id="duties"')[1].split("<h3>Trash duty</h3>")[0]
+    recent, earlier = kitchen.split('<details class="older">')
+    # The last 7 days in view, older ones folded (with all their buttons) under a count.
+    assert f"/admin/potential-drivers/{today_pd.id}/excuse" in recent
+    assert f"{old_day:%a} {short_date(old_day)}" in earlier
+    assert f"{old_day:%a} {short_date(old_day)}" not in recent
+    assert "<summary>1 earlier day</summary>" in earlier and "/excuse" in earlier
+
+
+async def test_empty_admin_lists_are_a_plain_sentence(session, client):
+    await make_users(session, n=3)
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    for section, sentence in [
+        ("absences", "Nobody is away."),
+        ("dishwasher", "Nobody has emptied it this month yet."),
+        ("strikes", "No active strikes."),
+    ]:
+        block = page.split(f'id="{section}"')[1].split("</section>")[0]
+        # Like "Nothing needs attention.": no table with only a header above it.
+        assert f'<p class="muted">{sentence}</p>' in block and "<table" not in block
+
+
+async def test_keep_missed_only_for_the_floor_speaker_and_missed_duties(session):
+    people = await make_users(session, n=4)
+    _, first, _, _, _ = await kitchen_pair(session, people)
+    with pytest.raises(DutyError, match="Only missed duties"):
+        await duties.keep_missed(session, first, people[0], at(MONDAY, 12))
+    first.status = Status.missed
+    with pytest.raises(DutyError, match="Only the floor speaker"):
+        await duties.keep_missed(session, first, people[1], at(MONDAY, 12))
+
+
+async def test_dishwasher_table_has_the_count_at_the_right(session, client):
+    people = await make_users(session, n=3)
+    await dishwasher.mark_cleared(session, people[1], settings.now())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/stats")).text
+    table = page.split('id="dishwasher"')[1].split("</table>")[0]
+    # Two columns: the name (with the hero tag next to it) and the count.
+    assert table.count("<th") == 2
+    row = table.split("<td")[1:]
+    assert len(row) == 2 and "on track for" in row[0] and 'class="num' in row[1]
+
+
+async def test_give_strike_confirm_names_the_resident(session, client):
+    await make_users(session, n=3)
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    form = page.split('action="/admin/strikes"')[1].split(">")[0]
+    # The text is built from the chosen resident when the form is sent.
+    assert "hx-on:htmx:confirm" in form and "hx-confirm" not in form.replace(
+        "hx-on:htmx:confirm", ""
+    )
+
+
+async def test_admin_confirmations_name_the_person(session, client):
+    people = await make_users(session, n=4)
+    _, first, second, p1, p2 = await kitchen_pair(session, people, settings.today())
+    await strikes.issue(session, user_id=people[3].id, reason="test", today=settings.today())
+    await session.commit()
+    await login(client, "p1")
+    page = html.unescape((await client.get("/admin")).text)
+    name = (p1 if first.user_id == p1.id else p2).display_name
+    assert f"hx-confirm=\"Excuse {name}'s kitchen duty on" in page
+    assert f"hx-confirm=\"Revoke {people[3].display_name}'s strike from" in page
+    assert f'hx-confirm="Pause {people[3].display_name}?' in page
+
+    await client.post(f"/potential-drivers/{first.id}/drove?next=/admin")
+    page = html.unescape((await client.get("/admin")).text)
+    assert f"hx-confirm=\"Dispute {name}'s kitchen duty on" in page
+
+
+async def test_admin_folds_revoked_strikes(session, client):
+    people = await make_users(session, n=3)
+    kept = await strikes.issue(
+        session, user_id=people[1].id, reason="still on", today=settings.today()
+    )
+    gone = await strikes.issue(
+        session, user_id=people[2].id, reason="taken back", today=settings.today()
+    )
+    await strikes.revoke(session, gone, settings.now())
+    await session.commit()
+    await login(client, "p1")
+    page = (await client.get("/admin")).text
+    folded = page.split("1 revoked or used")[1].split("</details>")[0]
+    assert "taken back" in folded and "still on" not in folded
+    assert kept.reason in page
+
+
+async def test_newcomers_are_told_what_this_is_and_whom_to_ask(session, client):
+    await make_users(session, n=3)
+    login_page = text(await client.get("/login"))
+    assert "Log in with the account your floor speaker gave you" in login_page
+    await login(client, "p2")
+    help_page = html.unescape(text(await client.get("/help")))
+    # The pair rule spelled out, and who the floor speaker is.
+    assert "Agree who cleans" in help_page and "you both get a strike" in help_page
+    assert "Your floor speaker: Person" in help_page
+    stats = text(await client.get("/stats"))
+    assert "+100 points = one duty more than your fair share" in stats
+
+
+async def test_stats_say_where_you_stand(session, client):
+    people = await make_users(session, n=4)
+    admin = people[0]
+    await users.add_away(session, admin, MONDAY, MONDAY, MONDAY)
+    _, first, _, p1, _ = await kitchen_pair(session, people)
+    await duties.mark_as_driver(session, first, p1, at(MONDAY, 20))
+    await strikes.issue(session, user_id=p1.id, reason="test", today=MONDAY)
+    await session.commit()
+    await login(client, p1.username)
+    page = text(await client.get("/stats"))
+    you = re.sub(r"<[^>]+>", "", page.split('id="you"')[1].split("</p>")[0])
+    # p1 cleaned once with 3 riders: two thirds of a duty ahead in the kitchen.
+    # One unit with the table (signed duties), in plain words.
+    assert "Kitchen: +0.7 duties (more than your share)" in you and "Trash: on par" in you
+    assert f"Strikes: 1 of {settings.strike_threshold}" in you
+    # The counts are hidden on phones; the table says so there.
+    assert 'class="num count"' in page and "More columns on a wider screen" in page
+
+
+async def test_profile_puts_strikes_first_and_password_last(session, client):
+    people = await make_users(session, n=3)
+    later = settings.today() + timedelta(days=3)
+    await users.add_away(session, people[1], later, later, settings.today())
+    await session.commit()
+    await login(client, "p2")
+    page = html.unescape(text(await client.get("/me")))
+    order = [
+        page.index(h) for h in ("<h2>Strikes", "<h2>Away", "My recent duties", "Change password")
+    ]
+    assert order == sorted(order)
+    assert "Duties you already have stay yours" in page
+    assert f"At {settings.strike_threshold} strikes you get a penalty trash week" in page
+    assert 'hx-confirm="Delete your absence from' in page
+
+
 async def test_admin_sees_and_deletes_absences(session, client):
     people = await make_users(session, n=3)
     later = settings.today() + timedelta(days=10)
@@ -1569,7 +2079,8 @@ async def test_admin_sees_and_deletes_absences(session, client):
     await session.commit()
     away_id = (await session.scalar(select(AwayPeriod))).id
     await login(client, "p1")
-    assert long_date(later) in (await client.get("/admin")).text
+    span = f"{short_date(later)}–{long_date(later + timedelta(days=2))}"
+    assert span in (await client.get("/admin")).text
     r = await client.post(f"/me/away/{away_id}/delete?next=/admin")
     assert r.headers["location"] == "/admin"
     assert await session.scalar(select(func.count(AwayPeriod.id))) == 0
@@ -1713,6 +2224,27 @@ async def test_preview_leaves_out_dishwasher_heroes(session):
     assert heroes & planned(in_october)
 
 
+async def test_dishwasher_undo_is_for_whoever_marked_it_for_a_short_while(session):
+    people = await make_users(session, n=3)
+    marked = at(MONDAY, 12)
+    clear = await dishwasher.mark_cleared(session, people[1], marked)
+    soon = marked + timedelta(minutes=dishwasher.UNDO_MINUTES - 1)
+    late = marked + timedelta(minutes=dishwasher.UNDO_MINUTES + 1)
+    assert dishwasher.can_undo_clear(clear, people[1], soon)
+    assert not dishwasher.can_undo_clear(clear, people[2], soon)
+    assert not dishwasher.can_undo_clear(clear, people[1], late)
+    with pytest.raises(DishwasherError):
+        await dishwasher.undo_clear(session, clear, people[2], soon)
+    await dishwasher.undo_clear(session, clear, people[1], soon)
+    # Gone, so the next emptying can be marked right away (by anyone).
+    await dishwasher.mark_cleared(session, people[2], soon)
+
+    # Not into a new month: the old one may already have decided the heroes.
+    end = at(date(2026, 11, 30), 23) + timedelta(minutes=58)
+    last = await dishwasher.mark_cleared(session, people[1], end)
+    assert not dishwasher.can_undo_clear(last, people[1], end + timedelta(minutes=5))
+
+
 async def test_admin_deletes_only_this_months_dishwasher_entries(session):
     people = await make_users(session, n=3)
     admin = people[0]
@@ -1743,20 +2275,31 @@ async def test_dishwasher_pages(session, client, monkeypatch):
 
     await login(client, "p2")
     page = text(await client.get("/"))
-    assert "I emptied it" in page
+    assert 'hx-post="/dishwasher?card=1"' in page
     assert "has no kitchen duty in" in page and "dishwasher hero</span>" in page
+    # Says what it's for to someone who hasn't emptied it yet.
+    assert "Optional: the 2 who empty it most get next month off kitchen duty" in page
     # The card swaps itself, like "Done".
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.status_code == 303 and r.headers["location"] == "/"
     page = text(await client.get("/"))
-    assert 'badge s-drove">done' in page and "The next one counts from" in page
-    assert "You emptied it once this month" in page and "I emptied it" not in page
+    # While it can't be marked: a plain label saying when it can, no (disabled) button.
+    assert "Again from" in page and "disabled" not in page
+    assert 'hx-post="/dishwasher?card=1"' not in page and 'badge s-drove">done' not in page
+    # A mis-tap can be taken back for a few minutes, by whoever marked it.
+    clear_id = await session.scalar(
+        select(DishwasherClear.id).where(DishwasherClear.user_id == people[1].id)
+    )
+    undo = f'hx-post="/dishwasher/{clear_id}/undo?card=1"'
+    assert undo in page
+    assert "You emptied it once this month" in page and "Optional:" not in page
+    assert "Last emptied by you today" in page
     # Too soon: the page reloads to show why.
     r = await client.post("/dishwasher?card=1", headers=card)
     assert r.headers.get("hx-refresh") == "true"
     assert "already emptied by you" in text(await client.get("/"))
     stats = text(await client.get("/stats"))
-    hero_in = f"hero in {dishwasher.next_month(settings.today()):%B}"
+    hero_in = f"on track for {dishwasher.next_month(settings.today()):%B}"
     assert 'id="dishwasher"' in stats and stats.count(hero_in) == 1
     assert "You emptied it once this month" in text(await client.get("/me"))
     assert (await client.post("/admin/dishwasher/1/delete")).status_code == 403
@@ -1765,7 +2308,10 @@ async def test_dishwasher_pages(session, client, monkeypatch):
     await client.post("/logout")
     await login(client, "p3")
     page = text(await client.get("/"))
-    assert "You have no kitchen duty in" in page and 'badge s-rode">not needed' in page
+    assert "You have no kitchen duty in" in page and "Again from" in page
+    assert 'badge s-rode">not needed' not in page and undo not in page
+    r = await client.post(f"/dishwasher/{clear_id}/undo?card=1", headers=card)
+    assert r.headers.get("hx-refresh") == "true"
     assert "You have no kitchen duty in" in text(await client.get("/me"))
 
     await users.set_active(session, people[3], False, settings.now())

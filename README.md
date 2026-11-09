@@ -21,6 +21,8 @@ gets a month off kitchen duty. The UI is in English.
 - Trash duty: weekly (Mon–Sun), 1 person.
 - Whoever cleaned clicks "Done" (only on their own duty, from its first day until the
   deadline). The other person becomes "not needed".
+- A mis-tapped "Done" can be undone for 10 minutes by whoever marked it (not after the
+  deadline, and not once the duty was disputed).
 - Deadline: 8:00 the day after the duty ends. After that the duty is "missed".
 - Each day's people (on Monday also the week's trash person) are chosen at 8:05, right
   after the previous duty's deadline. Until then the overview still shows the previous duty.
@@ -58,6 +60,7 @@ rounded so that they still sum to 0.
 - Counted per calendar month. The 2 residents with the most emptyings become **dishwasher
   heroes**: no kitchen duty for the whole next month. That month counts like being away (for
   kitchen only), so they don't have to catch up afterwards. Trash duty stays as usual.
+- A mis-tap can be taken back for 10 minutes by whoever marked it.
 - Ties: whoever reached the count first wins.
 - The floor speaker can delete wrong entries of the current month; earlier months are final.
 
@@ -70,8 +73,10 @@ week.
   floor speaker role.
 - Mark any duty done (also after the deadline), excuse it ("Excuse": no strike, no
   credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
-  gets a strike).
-- Give and revoke strikes; delete wrong dishwasher entries; run the daily job by hand.
+  gets a strike). A missed duty can also just stay missed ("Keep missed": the strike stays
+  and it leaves "Needs attention"; it can still be marked done or excused later).
+- Give and revoke strikes; enter absences for residents; delete wrong dishwasher entries;
+  run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `E103`: building, floor, room 01–99.

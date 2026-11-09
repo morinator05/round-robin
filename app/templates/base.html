@@ -33,7 +33,8 @@
     {% endif %}
   </nav>
   <main>
-    {% for kind, msg in messages %}<div class="flash {{ kind }}" role="status">{{ msg }}</div>{% endfor %}
+    {# Messages after an action; a page can show them elsewhere (admin: in the jump bar). #}
+    {% block messages %}{% for kind, msg in messages %}<div class="flash {{ kind }}" role="status">{{ msg }}</div>{% endfor %}{% endblock %}
     {% block content %}{% endblock %}
   </main>
 </body>

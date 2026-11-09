@@ -1,5 +1,5 @@
-/* Pastel blue with purple for your own name. Barely rounded corners, panels with a light
-   shadow, rooms and statuses as small flat tags. */
+/* Pastel blue with purple for your own name. Softly rounded corners, panels with a light
+   shadow, rooms and statuses as small flat tags, buttons slightly raised. */
 
 /* Overpass, self-hosted: no requests to Google. */
 @font-face {
@@ -17,9 +17,14 @@
   --shadow: 0 1px 2px rgba(31, 63, 115, .06), 0 4px 14px rgba(31, 63, 115, .07);
   --nav-bg: #d6e6f8; --nav-hover: #c3d9f3; --nav-active: #ffffff;
   --accent: #2f66b0; --accent-soft: #cfe1f7; --accent-strong: #173f73; --accent-line: #8fb3e2;
-  --room: #4a5b74; --room-soft: #e3eaf3;
-  --me: #6b46c1; --me-soft: #ece4fb;
-  --hero: #0f6a6e; --hero-soft: #d5f1f0;
+  --room: #4a5b74; --room-soft: #e3eaf3; --room-line: #c3cfdf;
+  --me: #6b46c1; --me-soft: #ece4fb; --me-line: #d3c3f3;
+  --hero: #0f6a6e; --hero-soft: #d5f1f0; --hero-line: #9fd8d5;
+  /* Buttons and other things to press stand out a little from the page; harder on hover. */
+  --raise: 0 1px 2px rgba(31, 63, 115, .18), 0 3px 8px rgba(31, 63, 115, .13),
+           inset 0 -2px 0 rgba(31, 63, 115, .07);
+  --raise-hover: 0 2px 4px rgba(31, 63, 115, .2), 0 5px 12px rgba(31, 63, 115, .16),
+                 inset 0 -2px 0 rgba(31, 63, 115, .07);
   --ok: #22703f; --ok-soft: #dcf2e4; --ok-line: #a7d7b9;
   --warn: #a64b07; --warn-soft: #fcf0d5; --warn-line: #ecce8e;
   --bad: #a83232; --bad-soft: #fbe3e3; --bad-line: #ecb0b0;
@@ -34,9 +39,14 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 14px rgba(0, 0, 0, .25);
     --nav-bg: #1a2940; --nav-hover: #243a5a; --nav-active: #2c476d;
     --accent: #9cc4f2; --accent-soft: #284466; --accent-strong: #dbe9fb; --accent-line: #4a72a3;
-    --room: #b3c2d6; --room-soft: #2a3648;
-    --me: #c4b1f6; --me-soft: #382d57;
-    --hero: #8fdcd8; --hero-soft: #17393b;
+    --room: #b3c2d6; --room-soft: #2a3648; --room-line: #3e4d63;
+    --me: #c4b1f6; --me-soft: #382d57; --me-line: #54457f;
+    --hero: #8fdcd8; --hero-soft: #17393b; --hero-line: #2c6164;
+    /* A dark shadow vanishes on a dark page: a thin light edge on top gives the depth. */
+    --raise: 0 2px 4px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(255, 255, 255, .1),
+             inset 0 -2px 0 rgba(0, 0, 0, .18);
+    --raise-hover: 0 3px 8px rgba(0, 0, 0, .6), inset 0 1px 0 rgba(255, 255, 255, .14),
+                   inset 0 -2px 0 rgba(0, 0, 0, .18);
     --ok: #9adbb3; --ok-soft: #1c3a2a; --ok-line: #3a6b4e;
     --warn: #ffb066; --warn-soft: #3a2a1a; --warn-line: #7a5230;
     --bad: #f2a7a7; --bad-soft: #432427; --bad-line: #7a3f44;
@@ -46,11 +56,16 @@
 }
 
 * { box-sizing: border-box; }
-/* Just a hint of rounding (3px, 2px on small tags), the same on everything, also on browser
-   defaults like buttons and date fields. Never pill-shaped. */
-.card, .table-wrap, .flash, .panel, button, input, select, .badge, nav a, .plan-switch a {
-  border-radius: 3px; }
-.room, .tag, .help-link, form.row label.check input { border-radius: 2px; }
+/* Rounded corners on one scale, the bigger the box the rounder, so large cards don't look
+   square next to small buttons: cards and tables on the page 8px, boxes inside a card
+   (tables, panels, messages) 6px, things to press and fill in 5px, status tags 4px, the
+   small tags in a line of text 3px. Also on browser defaults like buttons and date fields.
+   Never pill-shaped. */
+.card, .table-wrap { border-radius: 8px; }
+.card .table-wrap, .panel, .flash { border-radius: 6px; }
+button, input, select, nav a, .plan-switch a, .jump a { border-radius: 5px; }
+.badge { border-radius: 4px; }
+.room, .tag, .help-link, form.row label.check input { border-radius: 3px; }
 body { margin: 0; font: 16px/1.55 "Overpass", system-ui, sans-serif; background: var(--bg);
        color: var(--text); }
 main { max-width: 1000px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
@@ -88,26 +103,52 @@ nav form { margin: 0; }
 .room { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
         padding: .05em .55em 0; vertical-align: .1em;
         font-variant-numeric: tabular-nums; white-space: nowrap;
-        color: var(--room); background: var(--room-soft); }
+        color: var(--room); background: var(--room-soft);
+        /* A thin edge in a darker shade, drawn inside, so the tag keeps its size. */
+        box-shadow: inset 0 0 0 1px var(--room-line); }
 /* The logged-in user's own name, so you spot yourself at a glance. */
 .me { color: var(--me); }
-.me .room { color: var(--me); background: var(--me-soft); }
+.me .room { color: var(--me); background: var(--me-soft); box-shadow: inset 0 0 0 1px var(--me-line); }
 /* Small labels after a person, in the same shape as the room: "floor speaker", "inactive". */
 .tag { display: inline-block; font-size: .76em; font-weight: 600; line-height: 1.5;
        padding: .05em .55em 0; vertical-align: .1em; white-space: nowrap;
-       color: var(--neutral); background: var(--neutral-soft); }
-.tag-admin { color: var(--accent-strong); background: var(--accent-soft); }
-.tag-hero { color: var(--hero); background: var(--hero-soft); }
+       color: var(--neutral); background: var(--neutral-soft);
+       box-shadow: inset 0 0 0 1px var(--neutral-line); }
+.tag-admin { color: var(--accent-strong); background: var(--accent-soft);
+             box-shadow: inset 0 0 0 1px var(--accent-line); }
+.tag-hero { color: var(--hero); background: var(--hero-soft);
+            box-shadow: inset 0 0 0 1px var(--hero-line); }
 
 /* --- Panels. */
 .grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
 .card { background: var(--card); border: 1px solid var(--border);
         padding: 1.25rem; box-shadow: var(--shadow); }
 .card h2 { margin-top: 0; }
+/* A paragraph at the end of a card doesn't add its margin to the card's padding. */
+.card > :last-child { margin-bottom: 0; }
+.card h3 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
 /* Space between stacked cards; cards side by side in a .grid use its gap instead. */
 main > .card + .card { margin-top: 1.25rem; }
 h1.date { font-variant-numeric: tabular-nums; }
-/* My profile: the away periods under the form. */
+/* Overview: what it means for you, right under the date. */
+.you { margin: -.25rem 0 1.25rem; display: flex; flex-wrap: wrap; gap: .2rem 1.1rem; }
+/* Text that stays on one line, such as one date in a column that may wrap. */
+.nowrap { white-space: nowrap; }
+/* "Undo" in a card's last line: a small text button, not another big box. */
+.duty .foot button.link { padding: 0 .2rem; font-size: inherit; color: var(--accent); }
+/* Before the deadline hour: when the next duty is assigned, under the card title. */
+.duty .assigned { margin: -.4rem 0 .6rem; font-size: .9rem; }
+/* Away forms (profile, admin): the fields share the card's width, "Add" stays as wide as its text. */
+.away-form label { flex: 1 1 9rem; }
+.away-form input, .away-form select { width: 100%; }
+/* The note under the away form; the profile's two cards; the password card, last and narrow. */
+.away-form + .note { margin: .6rem 0 0; font-size: .9rem; }
+.grid.profile { margin-top: 1.5rem; }
+.card.password { margin-top: 1.5rem; max-width: 32rem; }
+/* Under the statistics: what the points mean; a note that only shows on phones. */
+.phone-only { display: none; }
+.legend { margin: .6rem 0 0; font-size: .9rem; }
+/* The away periods under the form. */
 .away-list { margin-top: .9rem; border-top: 1px solid var(--border); }
 .away-list .person:first-of-type { padding-top: .6rem; }
 .away-list > p { margin: .6rem 0 0; }
@@ -126,21 +167,26 @@ h1.date { font-variant-numeric: tabular-nums; }
    could still do it; the plan shown is the current one. */
 .plan-switch { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .6rem; }
 .plan-switch .muted { flex-basis: 100%; }
-.plan-switch a { padding: .25rem .65rem .15rem; border: 1px solid var(--border-strong);
-                 background: var(--card); color: var(--accent);
+.plan-switch a { padding: .25rem .65rem .15rem; border: 1px solid var(--accent-line);
+                 background: var(--card); color: var(--accent); box-shadow: var(--raise);
                  text-decoration: none; font-size: .9rem; }
-.plan-switch a:hover { border-color: var(--accent); }
+.plan-switch a:hover { border-color: var(--accent); box-shadow: var(--raise-hover); }
+/* The plan shown: filled and not raised, like a pressed button. */
 .plan-switch a[aria-current="true"] { background: var(--accent-soft); border-color: var(--accent-line);
-                                      color: var(--accent-strong); font-weight: 700; }
+                                      color: var(--accent-strong); font-weight: 700;
+                                      box-shadow: none; }
+.plan-switch .room { box-shadow: none; }
 /* The room inside a choice: just the number, in the link's own colour. */
-.plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none; }
+.plan-switch .room { font-size: inherit; font-weight: 400; padding: 0; color: inherit; background: none;
+                     vertical-align: baseline; }
 /* The preview's date column: short, in even-width digits so the days line up. */
 .preview td:first-child { width: 7.5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-/* --- Status tags. Same box as a button, so status and button line up next to each other.
-   Tags are flat with a light frame in their own colour, buttons have a stronger accent
-   frame and are slightly raised, so it's clear which one can be clicked. */
-.badge { display: inline-block; padding: .4rem .9rem .3rem; font: inherit; font-size: .9rem;
+/* --- Status tags. As wide as a button, so status and button line up under each other,
+   but lower, smaller and flat: a tinted fill with a thin edge in a darker shade, no shadow,
+   in normal weight. Buttons are bold and raised (a shadow), the main ones solid, so it's
+   clear which one can be clicked. */
+.badge { display: inline-block; padding: .2rem .6rem .12rem; font: inherit; font-size: .8rem;
          line-height: 1.5; border: 1px solid var(--neutral-line); white-space: nowrap;
          text-align: center; color: var(--neutral); background: var(--neutral-soft); }
 .s-drove { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line);
@@ -164,11 +210,17 @@ h1.date { font-variant-numeric: tabular-nums; }
 button { font: inherit; font-size: .9rem; line-height: 1.5; font-weight: 700;
          padding: .4rem .9rem .3rem; cursor: pointer;
          border: 1px solid var(--accent-line); background: var(--accent-soft);
-         color: var(--accent-strong); box-shadow: 0 1px 2px rgba(31, 63, 115, .12);
-         transition: background-color .15s, border-color .15s; }
-button:hover { border-color: var(--accent); }
+         color: var(--accent-strong); box-shadow: var(--raise);
+         transition: background-color .15s, border-color .15s, box-shadow .15s; }
+button:hover { border-color: var(--accent); box-shadow: var(--raise-hover); }
 button:active { transform: translateY(1px); box-shadow: none; }
-button.secondary { background: var(--card); color: var(--accent); border-color: var(--border-strong); }
+/* The one thing to do on a card ("Done", "I emptied it"): solid. */
+button.primary { background: var(--accent); color: var(--card); border-color: var(--accent); }
+button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+button:disabled, button:disabled:hover { opacity: .45; cursor: default; transform: none;
+                                         box-shadow: none; }
+button.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+button.secondary { background: var(--card); color: var(--accent); border-color: var(--accent-line); }
 button.secondary:hover { background: var(--card-alt); border-color: var(--accent); }
 button.danger { background: var(--card); color: var(--bad); border-color: var(--bad-line); }
 button.danger:hover { background: var(--bad-soft); border-color: var(--bad); }
@@ -214,8 +266,18 @@ form.stack button { align-self: flex-start; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 
 /* --- Tables: a panel with hairline rows. */
-.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border);
-              box-shadow: var(--shadow); }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); box-shadow: var(--shadow);
+  /* A soft shadow at an edge where more of the table is hidden, so a table that scrolls
+     sideways on a phone shows it: the card-coloured covers scroll with the content
+     ("local") and hide the shadows ("scroll") once that edge is reached. */
+  background:
+    linear-gradient(to right, var(--card) 40%, transparent) left / 2.5rem 100% no-repeat local,
+    linear-gradient(to left, var(--card) 40%, transparent) right / 2.5rem 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(31, 63, 115, .22), transparent)
+      left / .9rem 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(31, 63, 115, .22), transparent)
+      right / .9rem 100% no-repeat scroll,
+    var(--card); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: .55rem .8rem .45rem; border-bottom: 1px solid var(--border);
          vertical-align: middle; }
@@ -233,6 +295,10 @@ th.end { width: 1%; }
 /* Statistics: each number column exactly as wide as its one-line heading, all with the
    same gap; the name column takes the rest. */
 table.stats th:not(:first-child) { width: 1%; }
+/* The names stay in view while the numbers scroll sideways on a phone. */
+table.stats tr > :first-child { position: sticky; left: 0; z-index: 1; background: var(--card);
+                                box-shadow: 1px 0 0 var(--border); }
+table.stats tr > th:first-child, table.stats tr:hover > td:first-child { background: var(--card-alt); }
 /* Muted rows (inactive residents, revoked strikes) keep the normal text size. */
 tr.muted { font-size: inherit; }
 /* Numbers line up on the right, in even-width digits. */
@@ -241,13 +307,54 @@ td.points { font-weight: 600; }
 /* The last column of a table, with tags or buttons: kept at the right edge. */
 th.end, td.end { text-align: right; white-space: nowrap; }
 td.end form.inline + form.inline { margin-left: .4rem; }
+/* Admin duties: one table per duty with the same columns, so both line up. A trip's
+   residents sit close together with no line between them, one hairline between trips, and
+   the whole trip lit up on hover. */
+table.trips { table-layout: fixed; min-width: 54rem; }
+table.trips .col-date { width: 11rem; }
+table.trips .col-status { width: 8.5rem; }
+/* Room for Done, Excuse and Keep missed, in "Needs attention" and the duties alike, so the
+   columns of the stacked cards line up; the buttons start at the left, so each one stands
+   in the same place everywhere. */
+table.trips .col-action { width: 24rem; }
+table.trips td.end { text-align: left; }
+table.trips tbody.trip td { border-bottom: 0; }
+table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 1px solid var(--border); }
+table.trips tbody.trip > tr:not(:last-child) > td { padding-bottom: .15rem; }
+table.trips tbody.trip > tr + tr > td { padding-top: .15rem; }
+/* All cells of a line share the text baseline, so the date (a rowspan cell aligns with its
+   first line) starts level with the first resident, also when a penalty week says so on a
+   second line. An invisible strut as high as a button gives every line the same height,
+   with buttons or without. */
+table.trips td { vertical-align: baseline; }
+table.trips td[rowspan] { white-space: normal; }
+table.trips td.end::after { content: "\200b"; display: inline-block; width: 0; font-size: .9rem;
+                            line-height: 1.5; padding: .4rem 0 .3rem;
+                            border: solid transparent; border-width: 1px 0; }
+table.trips .penalty { display: block; }
+table.trips tbody.trip:hover td { background: var(--card-alt); }
 /* History: fixed column widths, so the kitchen and trash duty tables line up although
    a week ("Mon 27 Oct–2 Nov") is longer than a day. Narrow screens scroll sideways. */
 table.history { table-layout: fixed; min-width: 56rem; }
 table.history .col-date { width: 12rem; }
 table.history .col-action { width: 9rem; }
+/* A penalty week says so under the dates, which already fill the column. */
+table.history .penalty { display: block; }
+/* "nobody" and "–" as large as the names in the same column. */
+table.history span.muted { font-size: inherit; }
+/* Admin strikes: fixed columns, so the active and the older strikes line up. The reason
+   takes the rest and wraps if needed. */
+table.strike-list { table-layout: fixed; min-width: 46rem; }
+table.strike-list .col-date { width: 10rem; }
+table.strike-list .col-who { width: 9rem; }
+table.strike-list .col-by { width: 6.5rem; }
+table.strike-list .col-action { width: 8.5rem; }
+/* Revoked and used strikes: Revoke as a quiet text button, so the active list stays the
+   one that stands out. */
+tr.muted td.end button { background: none; border-color: transparent; box-shadow: none; }
+tr.muted td.end button:hover { background: var(--nav-hover); }
 /* Inside a card the table is part of the card: no second shadow, only the card's corners. */
-.card .table-wrap { box-shadow: none; border-radius: 2px; }
+.card .table-wrap { box-shadow: none; }
 .card form.row + .table-wrap { margin-top: 1rem; }
 .card .table-wrap + .actions { margin-top: 1rem; }
 
@@ -255,6 +362,19 @@ table.history .col-action { width: 9rem; }
 .flash { padding: .65rem 1rem .55rem; margin-bottom: .75rem;
          color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line); }
 .flash.error { color: var(--bad); background: var(--bad-soft); border-color: var(--bad-line); }
+/* The message stays in view when the page scrolls back to the section that was changed
+   (admin page); a success message fades after a few seconds, an error stays. */
+.flash { position: sticky; top: .5rem; z-index: 5; box-shadow: var(--shadow); }
+.flash.ok { animation: flash-out .4s ease-in 5s forwards; }
+@keyframes flash-out { to { opacity: 0; visibility: hidden; } }
+/* Admin: the message sits in the sticky jump bar, under the links, across its width; a
+   success message folds away again after a few seconds. */
+.jump .flash { flex-basis: 100%; position: static; margin: 0; box-shadow: none; }
+.jump .flash.ok { animation: flash-fold .4s ease-in 5s forwards; }
+@keyframes flash-fold { to { opacity: 0; visibility: hidden; max-height: 0; margin-top: -.4rem;
+                             padding-block: 0; border-width: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .flash.ok, .jump .flash.ok { animation-duration: 0s; animation-delay: 8s; } }
 
 /* --- "?" after a heading: a small square link to that topic on the help page. */
 .help-link { display: inline-grid; place-content: center; width: 1.4em; height: 1.4em;
@@ -272,6 +392,41 @@ table.history .col-action { width: 9rem; }
 .card.help .table-wrap { margin-top: .25rem; }
 main > p { max-width: 68ch; }
 
+/* --- Admin: a bar of links to the sections, with what's waiting in each. */
+.jump { display: flex; flex-wrap: wrap; gap: .4rem; margin: -.5rem 0 1.25rem;
+         /* Stays at the top of the long page, with the message after an action in it. */
+         position: sticky; top: 0; z-index: 4; padding: .5rem 0; background: var(--bg); }
+/* "Needs attention": the residents close to a penalty week, one entry each, side by side. */
+ul.near { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap;
+          gap: .3rem 1.75rem; }
+ul.near li { white-space: nowrap; }
+ul.near a { margin-left: .35rem; }
+/* "Full name · @username" after a resident's name: the dot with even room on both sides
+   (Overpass draws it right of centre, so the right margin is larger). */
+.sep { margin: 0 .55em 0 .3em; }
+/* On a phone: small chips in two rows, so all six links show and the sticky bar stays
+   low; the counts as bare numbers. */
+@media (max-width: 600px) {
+  .jump { gap: .3rem; padding: .4rem 0; }
+  .jump a { padding: .25rem .5rem .15rem; font-size: .8rem; }
+}
+/* Sections scrolled into view (jump bar, after an action) stop below the sticky bar and
+   the message in it. */
+main > section[id] { scroll-margin-top: 8rem; }
+/* Deleting a resident stays well away from Deactivate: at the far right. */
+.panel .actions form:has(.danger) { margin-left: auto; }
+/* The links grow to fill each row of the bar, so it is as wide as the cards below it. */
+.jump a { flex: 1 1 auto; text-align: center; white-space: nowrap;
+          padding: .35rem .7rem .25rem; text-decoration: none; font-weight: 600;
+          color: var(--accent-strong); background: var(--card); border: 1px solid var(--accent-line);
+          box-shadow: var(--raise); }
+.jump a:hover { border-color: var(--accent); box-shadow: var(--raise-hover); }
+.jump .muted { font-weight: 400; margin-left: .2rem; }
+/* Revoked and used strikes, folded under the active ones. */
+details.older { margin-top: .75rem; }
+details.older > summary { padding: .25rem 0 .6rem; color: var(--accent); font-weight: 600; }
+/* "Run daily job now" with the note when it runs by itself. */
+form.actions .muted { margin-left: .6rem; font-size: .9rem; }
 /* --- Admin: "add a resident" and one line per resident, each folding out its forms. */
 details summary { cursor: pointer; }
 details.add > summary { padding: .25rem 0 .9rem; color: var(--accent); font-weight: 700; }
@@ -281,10 +436,15 @@ details.resident > summary { padding: .6rem 0 .5rem; }
 details.resident.inactive .person-name { color: var(--muted); font-weight: 400; }
 .panel { display: grid; gap: .75rem; margin: 0 0 1rem; padding: 1rem;
          background: var(--card-alt); }
-/* The text fields share the whole width of the card; the room number only needs a short one. */
-.panel form.row label:not(.check) { flex: 2 1 9rem; }
-.panel form.row label.short { flex: 1 1 5rem; }
+/* "Add resident" and each resident's form on the same columns, so the stacked panels line
+   up: name, a short room number, two password-ish fields ("New password" takes both), the
+   checkbox and an equally wide button. */
+.panel form.row { display: grid; align-items: end;
+                  grid-template-columns: 2fr 1fr 2fr 2fr max-content 5rem; }
+.panel form.row > * { min-width: 0; }
+.panel form.row label.wide { grid-column: span 2; }
 .panel form.row label:not(.check) input { width: 100%; }
+.panel form.row > button { width: 100%; }
 
 /* --- Phones. */
 @media (max-width: 600px) {
@@ -293,12 +453,79 @@ details.resident.inactive .person-name { color: var(--muted); font-weight: 400; 
   nav .brand { width: 100%; padding: .2rem .1rem; }
   .nav-links a { padding: .3rem .55rem .2rem; }
   .nav-user { margin-left: 0; width: 100%; }
-  /* History: narrower columns, a week's date may take two lines. */
-  table.history { min-width: 38rem; }
-  table.history .col-date { width: 6.5rem; }
-  table.history .col-action { width: 7.5rem; }
-  table.history td:first-child { white-space: normal; }
+  /* History: each duty stacked (date, who was on it, who marked it, Dispute on the right),
+     so nothing hides beyond the right edge. */
+  .table-wrap table.history { min-width: 0; table-layout: auto; }
+  table.history, table.history tbody { display: block; }
+  table.history colgroup, table.history tr:first-child:has(th) { display: none; }
+  table.history tr { display: grid; grid-template-columns: 1fr auto; align-items: start;
+                     gap: .3rem .6rem; padding: .6rem .7rem; }
+  table.history tr + tr { border-top: 1px solid var(--border); }
+  table.history td { display: block; padding: 0; border: 0; white-space: normal; }
+  table.history td:first-child { grid-column: 1 / -1; font-weight: 600; }
+  table.history td:not(:first-child):not(.end) { grid-column: 1; }
+  table.history td.end { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+  /* Statistics: only the columns that matter most fit a phone; the counts are left out. */
+  table.stats .count, .wide-only { display: none; }
+  table.stats th, table.stats td { padding-left: .5rem; padding-right: .5rem; }
+  /* The header row is hidden, so the last line says what it is. */
+  table.history td:nth-child(3)::before { content: "Done by "; color: var(--muted); }
+  table.history .penalty { display: inline; }
+  .phone-only { display: block; }
+  /* The first column only as wide as it needs: 12rem would squeeze the others. */
+  th:first-child { width: auto; }
+  /* The plan choices stacked, each across the whole width. */
+  .plan-switch a { flex: 1 1 auto; text-align: center; }
   .card .table-wrap table { min-width: 36rem; }
+  /* Small tables (a date, a name or two, a tag or button) fit the screen instead: the
+     date may take two lines and the cells are a bit narrower. */
+  .card .table-wrap table.compact { min-width: 0; }
+  table.compact th, table.compact td { padding-left: .55rem; padding-right: .55rem; }
+  table.compact td:first-child { white-space: normal; }
+  /* Admin duties and strikes: each row stacked into the screen width instead of a wide
+     table, so every button can be reached without scrolling sideways. */
+  .card .table-wrap table.trips, .card .table-wrap table.strike-list { min-width: 0; }
+  table.trips, table.trips tbody, table.strike-list, table.strike-list tbody { display: block; }
+  table.trips thead, table.trips colgroup, table.strike-list colgroup,
+  table.strike-list tr:first-child:has(th) { display: none; }
+  /* A resident without buttons ("not needed") gets no empty line under the name. */
+  table.trips td.end:empty { display: none; }
+  /* A trip's residents close together, the trips apart. */
+  table.trips tbody.trip > tr + tr { padding-top: .1rem; }
+  table.trips tr, table.strike-list tr { display: grid; grid-template-columns: 1fr auto;
+                                     align-items: center; gap: .35rem .6rem; padding: .55rem .7rem; }
+  table.trips td, table.strike-list td { display: block; padding: 0; border: 0; white-space: normal; }
+  table.trips tbody.trip + tbody.trip, table.strike-list tr + tr { border-top: 1px solid var(--border); }
+  /* The cells' own lines from the wide table don't belong in the stacked one. */
+  table.trips tbody.trip + tbody.trip > tr:first-child > td { border-top: 0; }
+  /* Duties: the date heads the trip; per resident the name and status, buttons below. */
+  table.trips td[rowspan] { grid-column: 1 / -1; padding: 0; font-weight: 600; }
+  table.trips td.end { grid-column: 1 / -1; text-align: right; }
+  /* Stacked rows light up as a whole (a tap leaves them "hovered"), not cell by cell. */
+  table.trips tbody.trip:hover td, table.strike-list tr:hover > td,
+  table.history tr:hover > td { background: none; }
+  table.trips tbody.trip:hover tr, table.strike-list tr:hover,
+  table.history tr:hover { background: var(--card-alt); }
+  /* Stacked lines have no common height to keep. */
+  table.trips td.end::after { content: none; }
+  /* "Needs attention": the buttons fill the width, Keep missed on a line of its own. */
+  table.attention td.end { display: flex; flex-wrap: wrap; gap: .4rem; }
+  table.attention td.end form.inline { flex: 1 1 auto; margin: 0; }
+  table.attention td.end button { width: 100%; }
+  /* Strikes: date, resident, reason and who gave it stacked; status or Revoke on the right. */
+  table.strike-list td.end { grid-column: 2; grid-row: 1 / span 4; }
+  table.strike-list td:not(.end) { grid-column: 1; }
+  /* Resident panels: name and room side by side, the rest one under the other and the
+     button across the width, like the away forms. */
+  .panel form.row { grid-template-columns: 2fr 1fr; }
+  .panel form.row > :nth-child(n+3) { grid-column: 1 / -1; }
+  /* The jump bar has two rows here, plus the message. */
+  main > section[id] { scroll-margin-top: 10rem; }
+  /* Away forms and "Give strike": one field under the other, the button across the whole
+     card below them. */
+  .away-form label, .away-form button, form.row.fill > label, form.row.fill > button {
+    flex-basis: 100%; }
+  form.row.fill select { width: 100%; }
   /* The help page's two-column tables wrap instead of scrolling sideways. */
   .card.help .table-wrap table { min-width: 0; }
 }

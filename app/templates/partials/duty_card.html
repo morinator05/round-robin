@@ -9,6 +9,12 @@
       {% if duty == Duty.kitchen %}{{ day or (trip.start_date|weekday ~ " " ~ trip.start_date|short_date) }}{% elif trip %}{{ trip.start_date|short_date }}–{{ trip.end_date|short_date }}{% endif %}
     </span>
   </h2>
+  {# Before the deadline hour this is still yesterday's (last week's) duty: say when the
+     next one comes, so nobody wonders who is on today. #}
+  {% if trip and trip.end_date < today %}
+    <p class="muted assigned">{{ "Today's kitchen" if duty == Duty.kitchen else "This week's trash" }}
+      duty is assigned at {{ "%02d"|format(deadline_hour) }}:05.</p>
+  {% endif %}
   {% if trip and trip.is_penalty %}<p class="penalty">Penalty trash duty ({{ strike_threshold }} strikes)</p>{% endif %}
   {% if not trip or not trip.potential_drivers %}
     <p class="muted">Nobody assigned.</p>
@@ -17,9 +23,12 @@
       <div class="person">
         <div class="name">{{ person(pd.user) }}</div>
         {% if can_mark_as_driver(pd) %}
-          <button hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
+          <button class="primary" hx-post="/potential-drivers/{{ pd.id }}/drove?card=1"
                   hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
-                  hx-select-oob="#kitchen-preview,#trash-preview" hx-swap="outerHTML">Done</button>
+                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">
+            {#- Your own: what you did. Someone else's (floor speaker): what the click does. #}
+            {{- "I cleaned it" if user and pd.user_id == user.id else "Mark done" -}}
+          </button>
         {% else %}
           {% include "partials/status.html" %}
         {% endif %}
@@ -28,11 +37,24 @@
     {% set driver = trip.potential_drivers|selectattr("status", "equalto", Status.drove)|first %}
     {% if driver %}
       <p class="muted foot">Done by {{ person(driver.user) }}
-        on {{ driver.completed_at|date_time }}</p>
+        on {{ driver.completed_at|date_time }}
+        {% if can_undo is defined and can_undo(driver) %}·
+          <button class="link" hx-post="/potential-drivers/{{ driver.id }}/undo?card=1"
+                  hx-target="#card-{{ duty.value }}" hx-select="#card-{{ duty.value }}"
+                  hx-select-oob="#you,#kitchen-preview,#trash-preview" hx-swap="outerHTML">Undo</button>
+        {% endif %}</p>
     {% elif trip.potential_drivers|selectattr("disputed_at")|first %}
       <p class="muted foot">Disputed – the floor speaker decides who gets the credit</p>
     {% else %}
-      <p class="muted foot">Mark as done by {{ deadline|date_time }}</p>
+      {# What to do and by when; "you" for the people on it. #}
+      {% set mine = user and trip.potential_drivers|selectattr("user_id", "equalto", user.id)|list %}
+      {% set by = (deadline|weekday) ~ " " ~ (deadline|short_date) ~ ", " ~ (deadline|clock) %}
+      <p class="muted foot">
+        {%- if trip.potential_drivers|length > 1 %}
+          {%- if mine %}Only one of you needs to clean. Whoever does taps “I cleaned it” before {{ by }}.
+          {%- else %}Only one of them needs to clean, before {{ by }}.{% endif %}
+        {%- elif mine %}{{ "Take out the trash this week" if duty == Duty.trash else "Clean the kitchen" }}, then tap “I cleaned it” before {{ by }}.
+        {%- else %}To be done before {{ by }}.{% endif %}</p>
     {% endif %}
   {% endif %}
 </section>

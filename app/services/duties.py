@@ -440,6 +440,47 @@ async def mark_as_driver(
     await session.flush()
 
 
+# How long a "Done" can be taken back (a mis-tap), see `undo_driver`.
+UNDO_MINUTES = 10
+
+
+def can_undo(pd: PotentialDriver, actor: User, now: datetime) -> bool:
+    """Whether `actor` may take back `pd`'s "Done" now (see `undo_driver`).
+
+    Only whoever marked it (or the floor speaker), within `UNDO_MINUTES`, before the
+    trip's deadline, and only if nothing on the trip was disputed: then nobody on it was
+    missed or struck before, and undoing is the exact inverse of `mark_as_driver`.
+    """
+    if pd.status is not Status.drove or pd.completed_at is None:
+        return False
+    if not (actor.is_admin or pd.completed_by_id == actor.id):
+        return False
+    if now - pd.completed_at > timedelta(minutes=UNDO_MINUTES) or now >= deadline(pd.trip):
+        return False
+    return all(x.disputed_at is None for x in pd.trip.potential_drivers)
+
+
+async def undo_driver(
+    session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime
+) -> None:
+    """Take back a mis-tapped "Done": the trip is open again for everyone on it.
+
+    Raises:
+        DutyError: if `actor` may not (any more), see `can_undo`.
+    """
+    if not can_undo(pd, actor, now):
+        raise DutyError(
+            f"This can only be undone within {UNDO_MINUTES} minutes, by whoever marked it, "
+            "before the deadline"
+        )
+    for x in pd.trip.potential_drivers:
+        if x is pd or x.status is Status.rode:
+            x.status = Status.pending
+            x.completed_at = None
+            x.completed_by_id = None
+    await session.flush()
+
+
 async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime) -> None:
     """Admin only: nobody is blamed, but the person gets no drive either.
 
@@ -455,6 +496,23 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
     pd.completed_at = now
     pd.completed_by_id = actor.id
     pd.disputed_at = None
+    await session.flush()
+
+
+async def keep_missed(
+    session: AsyncSession, pd: PotentialDriver, actor: User, now: datetime
+) -> None:
+    """Admin only: a missed duty stays missed and its strike stays; it just no longer needs
+    the floor speaker's attention. It can still be marked done or excused later.
+
+    Raises:
+        DutyError: if `actor` isn't the floor speaker or the duty isn't missed.
+    """
+    if not actor.is_admin:
+        raise DutyError("Only the floor speaker can decide about missed duties")
+    if pd.status is not Status.missed:
+        raise DutyError("Only missed duties can be kept as missed")
+    pd.kept_missed_at = now
     await session.flush()
 
 
