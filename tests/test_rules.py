@@ -1915,13 +1915,18 @@ async def test_keep_missed_takes_it_off_needs_attention(session, client, midday)
     assert "kept missed" not in other_row.rsplit("<tr>", 1)[1]
     after = re.search(r'href="#attention">Needs attention <span class="muted">(\d+)', page)
     assert int(after.group(1)) == int(count.group(1)) - 1
-    # Nothing else changes: still missed, the strike stays.
+    # Nothing else changes: still missed, the strike stays. Counted for this duty only: when
+    # yesterday was a Sunday, last week's trash duty is overdue too and may be theirs.
     await session.refresh(late)
     assert late.status is Status.missed and late.kept_missed_at is not None
     active = await session.scalar(
         select(func.count())
         .select_from(Strike)
-        .where(Strike.user_id == late_user.id, Strike.revoked_at.is_(None))
+        .where(
+            Strike.user_id == late_user.id,
+            Strike.potential_driver_id == late.id,
+            Strike.revoked_at.is_(None),
+        )
     )
     assert active == 1
 
