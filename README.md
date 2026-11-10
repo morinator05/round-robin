@@ -22,7 +22,8 @@ gets a month off kitchen duty. The UI is in English.
 - Whoever cleaned clicks "Done" (only on their own duty, from its first day until the
   deadline). The other person becomes "not needed".
 - A mis-tapped "Done" can be undone for 10 minutes by whoever marked it (not after the
-  deadline, and not once the duty was disputed).
+  deadline, and not once the duty was disputed). An excused duty that was marked done by
+  mistake is excused again.
 - Deadline: 8:00 the day after the duty ends. After that the duty is "missed".
 - Each day's people (on Monday also the week's trash person) are chosen at 8:05, right
   after the previous duty's deadline. Until then the overview still shows the previous duty.

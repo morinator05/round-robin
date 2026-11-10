@@ -178,6 +178,16 @@ async def test_undo_done(session):
     assert pair.first.completed_at is None and pair.first.completed_by_id is None
     assert duties.can_mark_as_driver(pair.second, pair.p2, soon)
 
+    # An excused duty the floor speaker marked done by mistake is excused again after the
+    # undo, as it was: same time, same floor speaker.
+    excused = at(MONDAY, 21)
+    await duties.excuse(session, pair.first, admin, excused)
+    await duties.mark_as_driver(session, pair.first, admin, excused + timedelta(minutes=1))
+    await duties.undo_driver(session, pair.first, admin, excused + timedelta(minutes=2))
+    assert pair.first.status is Status.excused
+    assert (pair.first.completed_at, pair.first.completed_by_id) == (excused, admin.id)
+    assert pair.second.status is Status.pending
+
     # Never after the deadline, not even by the floor speaker.
     deadline = duties.deadline(pair.first.trip)
     await duties.mark_as_driver(session, pair.second, pair.p2, deadline - timedelta(minutes=2))

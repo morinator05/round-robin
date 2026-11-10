@@ -479,6 +479,8 @@ async def undo_driver(
 ) -> None:
     """Take back a mis-tapped "Done": the trip is open again for everyone on it.
 
+    A duty that was excused before it was marked done is excused again, as it was.
+
     Raises:
         DutyError: if `actor` may not (any more), see `can_undo`.
     """
@@ -488,7 +490,11 @@ async def undo_driver(
             "by whoever marked it, before the deadline"
         )
     for x in pd.trip.potential_drivers:
-        if x is pd or x.status is Status.rode:
+        if x is pd and x.excused_at is not None:
+            x.status = Status.excused
+            x.completed_at = x.excused_at
+            x.completed_by_id = x.excused_by_id
+        elif x is pd or x.status is Status.rode:
             x.status = Status.pending
             x.completed_at = None
             x.completed_by_id = None
@@ -507,8 +513,8 @@ async def excuse(session: AsyncSession, pd: PotentialDriver, actor: User, now: d
         raise DutyError("Only open or missed duties can be excused")
     await _revoke_strikes(session, pd, now)
     pd.status = Status.excused
-    pd.completed_at = now
-    pd.completed_by_id = actor.id
+    pd.completed_at = pd.excused_at = now
+    pd.completed_by_id = pd.excused_by_id = actor.id
     pd.disputed_at = None
     await session.flush()
 
