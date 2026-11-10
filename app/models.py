@@ -194,6 +194,10 @@ class PotentialDriver(Base):
     # Set when the floor speaker decided a missed duty stays missed (the strike stands); it
     # then no longer needs their attention.
     kept_missed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When and by whom it was excused. Kept when it's marked done afterwards, so undoing that
+    # "Done" makes it excused again.
+    excused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    excused_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
     trip: Mapped[Trip] = relationship(back_populates="potential_drivers")
     user: Mapped[User | None] = relationship(foreign_keys=[user_id])
