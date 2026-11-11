@@ -1,6 +1,8 @@
 services:
   db:
     image: postgres:16-alpine
+    # Back after a reboot or power cut, without anyone at the machine.
+    restart: unless-stopped
     environment:
       # From .env. Only applied when the database volume is first created: an existing
       # database keeps its user and name, so set them in .env to match it.
@@ -18,7 +20,12 @@ services:
       retries: 10
 
   app:
+    # A server pulls the released image (deploy/update.sh); `up --build` builds it locally.
+    # Set APP_IMAGE=ghcr.io/morinator05/round-robin:1.2.0 in .env to stay on (or go back
+    # to) one version.
+    image: ${APP_IMAGE:-ghcr.io/morinator05/round-robin:latest}
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -26,8 +33,19 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-e1}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-e1}
+      # Trust X-Forwarded-For/-Proto from the reverse proxy, so the login limits count real
+      # client addresses, not the proxy's. Safe only while the port below is reachable from
+      # this machine alone: anyone who can reach it directly could fake their address.
+      FORWARDED_ALLOW_IPS: "*"
+    healthcheck:
+      # The slim image has no curl. Healthy once migrations ran and the login page loads.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/login')"]
+      interval: 30s
+      start_period: 60s
+      start_interval: 2s
     ports:
-      - "8000:8000"
+      # Only reachable from this machine, where the reverse proxy (TLS) forwards to it.
+      - "${APP_BIND:-127.0.0.1}:8000:8000"
 
 volumes:
   pgdata:

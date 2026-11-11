@@ -121,6 +121,9 @@ In `.env`, see `.env.example`.
 | `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, see below. |
+| `SECURE_COOKIES` | `false` | Send the login cookie only over HTTPS. Turn on behind TLS. |
+| `APP_IMAGE` | newest release | Server only: stay on one version, e.g. `ghcr.io/morinator05/round-robin:1.2.0`. |
+| `APP_BIND` | `127.0.0.1` | Where the app's port 8000 is reachable. Local only, for the reverse proxy. |
 
 ## Tech stack
 
@@ -131,7 +134,7 @@ In `.env`, see `.env.example`.
 - **Auth:** signed session cookie (itsdangerous), passwords hashed with Argon2 (pwdlib)
 - **Config:** pydantic-settings, read from `.env`
 - **Tooling:** uv, pytest, ruff, GitHub Actions CI
-- **Deployment:** Docker Compose (app + database)
+- **Deployment:** Docker Compose (app + database), image on GHCR for amd64 and arm64
 
 ## Setup
 
@@ -146,7 +149,10 @@ docker compose exec app python -m scripts.create_admin   # first floor speaker
   come back.
 - **Server:** set a random `POSTGRES_PASSWORD` before the first start (later changes need
   `ALTER USER <user> PASSWORD '...'` in the database).
-- **Update:** `docker compose up -d --build`. Migrations run on every start.
+- **Server:** runs the released image behind a reverse proxy and updates itself every night
+  to the newest release, see [docs/deployment.md](docs/deployment.md). Release a version with
+  `gh release create v1.3.0 --generate-notes`.
+- **Update (local):** `docker compose up -d --build`. Migrations run on every start.
 - **Test residents:** `docker compose exec app python -m scripts.seed`. Add
   `--days 30` (on an empty database) for a simulated month of duties, misses and strikes.
 - **Reset:** `docker compose down -v` deletes the database.

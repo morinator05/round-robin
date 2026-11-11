@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Round Robin to the newest release
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/round-robin
+ExecStart=/opt/round-robin/deploy/update.sh

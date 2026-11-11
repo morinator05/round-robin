@@ -1,0 +1,12 @@
+[Unit]
+Description=Update Round Robin every night
+
+[Timer]
+# At night, well away from the daily duty job at the deadline hour (08:05).
+OnCalendar=*-*-* 04:00
+RandomizedDelaySec=15m
+# Catch up after the machine was off at 04:00.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
