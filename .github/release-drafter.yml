@@ -21,11 +21,6 @@ version-resolver:
   patch:
     labels: [bug]
   default: patch
-# Labels from the branch name, so most PRs need none by hand. `breaking` is always by hand.
-autolabeler:
-  - label: enhancement
-    branch: ['/^feature\//']
-  - label: bug
-    branch: ['/^fix\//']
+# PRs get enhancement or bug from their branch name (workflows/release-drafter.yml).
 template: |
   $CHANGES
