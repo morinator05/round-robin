@@ -4,6 +4,10 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 COPY . .
+# The release tag (e.g. v1.3.0), shown on the admin page. After the dependencies, so a new
+# version doesn't invalidate their cached layer.
+ARG APP_VERSION=""
+ENV APP_VERSION=$APP_VERSION
 # Not as root: a bug in the app can't change the image's files.
 RUN useradd --system --no-create-home app
 USER app

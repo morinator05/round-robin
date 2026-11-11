@@ -21,11 +21,17 @@ uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
 uv run python -m scripts.seed [--days 30]  # test residents (+ a simulated month on an empty DB)
 uv run python -m scripts.create_admin      # first floor speaker (admin) account
+gh release create v1.3.0 --generate-notes  # release: publishes the image, servers update at night
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff and pytest against Postgres 16. With `CI` set, an
-unreachable database is an error instead of a skip. The Docker image runs
-`alembic upgrade head` on every start.
+unreachable database is an error instead of a skip. Its `image` job builds the Docker
+image on amd64 and arm64 and starts it against an empty database (migrations apply,
+`/login` answers); `publish` runs only on `v*` tags and pushes the image to GHCR with the
+tag as `APP_VERSION` (shown on the admin page). The Docker image runs
+`alembic upgrade head` on every start. Servers run `deploy/update.sh` nightly (systemd
+timer): pull `latest`, check out its release tag, `pg_dump`, restart; see
+`docs/deployment.md`.
 
 ## Architecture
 
@@ -145,4 +151,6 @@ an absence or resuming someone makes them a rider again (`duties.add_riders`).
   folder).
 - Ruff: line length 100, rules E/F/W/I/UP/B. `UP042` is ignored on purpose: enums stay
   `str, Enum` because `StrEnum` changes how values print in templates.
-- `README.md` is short and written for residents/admins; keep implementation details out.
+- `README.md` is short and written for residents/admins (rules, pages); keep implementation
+  details out. Local setup, tests and the code map are in `docs/development.md`; server
+  setup, settings, releases and backups in `docs/deployment.md`.

@@ -76,6 +76,8 @@ h2 { font-size: 1.2rem; line-height: 1.3; font-weight: 700; margin: 2rem 0 .6rem
 h2 .muted { font-weight: 400; margin-left: .35rem; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .muted { color: var(--muted); font-size: .9em; }
+/* The running release, quietly under the admin page. */
+.version { margin-top: 2rem; text-align: center; font-size: .8rem; }
 .penalty { color: var(--bad); font-weight: 700; }
 .disputed { color: var(--bad); }
 .strikes { font-weight: 700; }
