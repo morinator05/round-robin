@@ -102,81 +102,10 @@ the floor speaker setting a new one) logs out all other devices.
 | How it works | login | The rules, for new residents |
 | Admin | floor speaker | Admin functions |
 
-## Settings
+## Running it
 
-In `.env`, see `.env.example`.
-
-| Setting | Default | Meaning |
-|---|---|---|
-| `SECRET_KEY` | – | Required, ≥ 32 chars (`openssl rand -hex 32`). Signs the session cookie. |
-| `POSTGRES_PASSWORD` | `e1` | Database password. Use a random one on a server. |
-| `DATABASE_URL` | local database | Only needed outside Docker. |
-| `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
-| `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
-| `DEADLINE_HOUR` | `8` | Deadline hour on the day after a duty; the next people are chosen right after it. |
-| `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
-| `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
-| `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
-| `DISHWASHER_COOLDOWN_MINUTES` | `90` | Minutes after an emptying before the next one can be marked. |
-| `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
-| `PREVIEW_DAYS` | `14` | Days shown in the plan. |
-| `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, see below. |
-| `SECURE_COOKIES` | `false` | Send the login cookie only over HTTPS. Turn on behind TLS. |
-| `APP_IMAGE` | newest release | Server only: stay on one version, e.g. `ghcr.io/morinator05/round-robin:1.2.0`. |
-| `APP_BIND` | `127.0.0.1` | Where the app's port 8000 is reachable. Local only, for the reverse proxy. |
-
-## Tech stack
-
-- **Backend:** Python 3.12, FastAPI, APScheduler for the daily job
-- **Database:** PostgreSQL 16, SQLAlchemy (async, asyncpg), Alembic migrations
-- **Frontend:** server-rendered Jinja templates, htmx for page loads without a full reload
-  and in-place updates, plain CSS. No JavaScript build step.
-- **Auth:** signed session cookie (itsdangerous), passwords hashed with Argon2 (pwdlib)
-- **Config:** pydantic-settings, read from `.env`
-- **Tooling:** uv, pytest, ruff, GitHub Actions CI
-- **Deployment:** Docker Compose (app + database), image on GHCR for amd64 and arm64
-
-## Setup
-
-```bash
-cp .env.example .env                    # set SECRET_KEY: openssl rand -hex 32
-docker compose up -d --build            # database + app, http://localhost:8000
-docker compose exec app python -m scripts.create_admin   # first floor speaker
-```
-
-- **First floor speaker without the script:** set the `ADMIN_*` variables in `.env`. The app
-  creates the account on startup only while there are no users, so a deleted admin doesn't
-  come back.
-- **Server:** set a random `POSTGRES_PASSWORD` before the first start (later changes need
-  `ALTER USER <user> PASSWORD '...'` in the database).
-- **Server:** runs the released image behind a reverse proxy and updates itself every night
-  to the newest release, see [docs/deployment.md](docs/deployment.md). Release a version with
-  `gh release create v1.3.0 --generate-notes`.
-- **Update (local):** `docker compose up -d --build`. Migrations run on every start.
-- **Test residents:** `docker compose exec app python -m scripts.seed`. Add
-  `--days 30` (on an empty database) for a simulated month of duties, misses and strikes.
-- **Reset:** `docker compose down -v` deletes the database.
-
-Development with auto-reload (database in Docker, app local):
-
-```bash
-docker compose up -d db
-uv sync
-uv run alembic upgrade head
-uv run fastapi dev app/main.py          # http://localhost:8000
-```
-
-## Tests
-
-```bash
-uv run pytest   # needs the database from `docker compose up -d db`
-uv run ruff check . && uv run ruff format --check .   # lint, as in CI
-```
-
-## Code
-
-- `app/services/carpool.py`: the fairness logic, without database (start reading here)
-- `app/services/`: the other rules (duties, strikes, dishwasher, users, login, daily job)
-- `app/web/`: pages and form actions, one module per page; templates in `app/templates/`
-- `app/models.py`: database tables; migrations in `migrations/`
-- `scripts/`: create the first floor speaker, add test residents
+- **On a server:** the Docker image behind your reverse proxy (HTTPS). It updates itself
+  every night to the newest release. Setup, settings, releases and backups:
+  [docs/deployment.md](docs/deployment.md).
+- **Development:** local setup, tests and a map of the code:
+  [docs/development.md](docs/development.md).

@@ -5,24 +5,6 @@ OS) behind your own reverse proxy, which handles TLS. Every night at about 04:00
 for a new release. If there is one, it backs up the database, switches to the new version
 and runs its migrations. Nobody has to log in to the machine for updates.
 
-## Releasing a version
-
-```bash
-gh release create v1.3.0 --generate-notes
-```
-
-You can also use the GitHub web page (Releases → Draft a new release) with a new tag like
-`v1.3.0`. CI tests the tagged commit, then publishes `ghcr.io/morinator05/round-robin` as
-`1.3.0`, `1.3` and `latest`. Servers pick up `latest` the next night. The admin page shows
-the running version at the bottom.
-
-Use `vMAJOR.MINOR.PATCH`: patch for fixes, minor for new features. Pre-releases such as
-`v1.3.0-rc.1` are published under their own tag only, never as `latest`, so you can try one
-with `APP_IMAGE` (below) without updating the servers.
-
-After the very first release, check on GitHub (your profile → Packages → round-robin →
-Package settings) that the package is **public**, so servers can pull it without logging in.
-
 ## Setup
 
 Requirements: Docker Engine 25 or newer with the Compose plugin
@@ -57,6 +39,29 @@ systemctl list-timers round-robin-update.timer    # shows the next run
 The units expect the repository in `/opt/round-robin`. For another place, change
 `WorkingDirectory` and `ExecStart` in the `.service` file.
 
+## Settings
+
+All in `.env`; `.env.example` has them with comments.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `SECRET_KEY` | – | Required, ≥ 32 chars (`openssl rand -hex 32`). Signs the session cookie. |
+| `POSTGRES_PASSWORD` | `e1` | Database password. Use a random one on a server, set before the first start (later: `ALTER USER <user> PASSWORD '...'` in the database). |
+| `DATABASE_URL` | local database | Only needed outside Docker. |
+| `TIMEZONE` | `Europe/Berlin` | Time zone for dates and deadlines. |
+| `FLOOR_NAME` | – | Optional floor name in the header ("Round Robin E1"). |
+| `DEADLINE_HOUR` | `8` | Deadline hour on the day after a duty; the next people are chosen right after it. |
+| `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
+| `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
+| `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
+| `DISHWASHER_COOLDOWN_MINUTES` | `90` | Minutes after an emptying before the next one can be marked. |
+| `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
+| `PREVIEW_DAYS` | `14` | Days shown in the plan. |
+| `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, created on startup only while there are no users (so a deleted admin doesn't come back). |
+| `SECURE_COOKIES` | `false` | Send the login cookie only over HTTPS. Turn on behind TLS. |
+| `APP_IMAGE` | newest release | Server only: stay on one version, e.g. `ghcr.io/morinator05/round-robin:1.2.0`. |
+| `APP_BIND` | `127.0.0.1` | Where the app's port 8000 is reachable. Local only, for the reverse proxy. |
+
 ## Reverse proxy
 
 The app listens on `127.0.0.1:8000` only. The proxy forwards to it and passes on the
@@ -84,6 +89,24 @@ location / {
 If the proxy runs in a Docker container itself, connect it to the `round-robin_default`
 network and forward to `app:8000`. Don't publish the app on other addresses with
 `APP_BIND`: anyone who can reach port 8000 directly can fake their address.
+
+## Releasing a version
+
+```bash
+gh release create v1.3.0 --generate-notes
+```
+
+You can also use the GitHub web page (Releases → Draft a new release) with a new tag like
+`v1.3.0`. CI tests the tagged commit, then publishes `ghcr.io/morinator05/round-robin` as
+`1.3.0`, `1.3` and `latest`. Servers pick up `latest` the next night. The admin page shows
+the running version at the bottom.
+
+Use `vMAJOR.MINOR.PATCH`: patch for fixes, minor for new features. Pre-releases such as
+`v1.3.0-rc.1` are published under their own tag only, never as `latest`, so you can try one
+with `APP_IMAGE` (see Settings) without updating the servers.
+
+After the very first release, check on GitHub (your profile → Packages → round-robin →
+Package settings) that the package is **public**, so servers can pull it without logging in.
 
 ## What happened?
 

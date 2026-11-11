@@ -151,4 +151,6 @@ an absence or resuming someone makes them a rider again (`duties.add_riders`).
   folder).
 - Ruff: line length 100, rules E/F/W/I/UP/B. `UP042` is ignored on purpose: enums stay
   `str, Enum` because `StrEnum` changes how values print in templates.
-- `README.md` is short and written for residents/admins; keep implementation details out.
+- `README.md` is short and written for residents/admins (rules, pages); keep implementation
+  details out. Local setup, tests and the code map are in `docs/development.md`; server
+  setup, settings, releases and backups in `docs/deployment.md`.
