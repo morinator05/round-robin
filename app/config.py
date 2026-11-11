@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     dishwasher_heroes: int = 2
     # Send the login cookie only over HTTPS. Turn on when the app is behind TLS.
     secure_cookies: bool = False
+    # The running release, e.g. "v1.3.0", shown on the admin page. Set by the Docker build
+    # from the release tag; empty when run from a checkout.
+    app_version: str = ""
     # Off in tests, so no background job touches the test database.
     run_scheduler: bool = True
     # Optional first floor speaker, created on startup while there are no users at all.

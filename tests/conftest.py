@@ -15,6 +15,7 @@ os.environ.update(
     PREVIEW_DAYS="14",
     DISHWASHER_COOLDOWN_MINUTES="90",
     DISHWASHER_HEROES="2",
+    APP_VERSION="",
 )
 
 from contextlib import AsyncExitStack  # noqa: E402

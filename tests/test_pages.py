@@ -326,10 +326,16 @@ async def test_help_page(session, browser, monkeypatch):
 # --- admin ----------------------------------------------------------------------
 
 
-async def test_admin_needs_attention_and_keep_missed(session, browser, clock):
+async def test_admin_needs_attention_and_keep_missed(session, browser, clock, monkeypatch):
     people = await make_users(session, n=4)
     admin = await browser("p1")
-    assert "Nothing needs attention." in words(await admin.get("/admin"))
+    page = words(await admin.get("/admin"))
+    assert "Nothing needs attention." in page
+    # The running version (the release tag, set by the Docker build), so an update can be
+    # seen without access to the server.
+    assert "Version development" in page
+    monkeypatch.setattr(settings, "app_version", "v1.3.0")
+    assert "Version v1.3.0" in words(await admin.get("/admin"))
 
     # Yesterday's kitchen duty nobody marked (missed by now), and today's (still open).
     late = await kitchen_pair(session, people, clock.today - timedelta(days=1))

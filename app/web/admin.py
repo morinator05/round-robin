@@ -104,6 +104,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         dishwasher_clears=await dishwasher.clears_in_month(session, today),
         can_mark=lambda pd: duties.can_mark_as_driver(pd, user, now),
         can_undo=lambda pd: duties.can_undo(pd, user, now),
+        version=settings.app_version or "development",
     )
 
 
