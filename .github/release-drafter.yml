@@ -1,0 +1,26 @@
+# Keeps a draft of the next release (Releases page) up to date after every merge into main:
+# the version and the notes come from the labels of the merged PRs. Publishing the draft
+# creates the tag, which publishes the image (ci.yml) for the servers.
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+change-template: "- $TITLE (#$NUMBER)"
+categories:
+  - title: Breaking changes
+    labels: [breaking]
+  - title: Features
+    labels: [enhancement]
+  - title: Fixes
+    labels: [bug]
+# breaking: x.0.0, installed only when a server is switched to it (APP_IMAGE).
+# enhancement: x.y.0 and bug or no label: x.y.z, both installed automatically.
+version-resolver:
+  major:
+    labels: [breaking]
+  minor:
+    labels: [enhancement]
+  patch:
+    labels: [bug]
+  default: patch
+# PRs get enhancement or bug from their branch name (workflows/release-drafter.yml).
+template: |
+  $CHANGES

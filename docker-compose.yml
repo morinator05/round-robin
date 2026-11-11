@@ -20,10 +20,10 @@ services:
       retries: 10
 
   app:
-    # A server pulls the released image (deploy/update.sh); `up --build` builds it locally.
-    # Set APP_IMAGE=ghcr.io/morinator05/round-robin:1.2.0 in .env to stay on (or go back
-    # to) one version.
-    image: ${APP_IMAGE:-ghcr.io/morinator05/round-robin:latest}
+    # A server pulls the newest 1.x release (deploy/update.sh); `up --build` builds it
+    # locally. A breaking major version needs APP_IMAGE=ghcr.io/morinator05/round-robin:2 in
+    # .env; APP_IMAGE=…:1.2.0 stays on (or goes back to) one version.
+    image: ${APP_IMAGE:-ghcr.io/morinator05/round-robin:1}
     build: .
     restart: unless-stopped
     depends_on:

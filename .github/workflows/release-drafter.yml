@@ -1,0 +1,44 @@
+name: Release draft
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  # A PR gets its version label from the branch name: feature/ → enhancement (minor),
+  # fix/ → bug (patch). `breaking` (major) is always set by hand.
+  label:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Label from the branch name
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.head_ref }}
+          PR: ${{ github.event.pull_request.html_url }}
+        run: |
+          case "$BRANCH" in
+            feature/*) gh pr edit "$PR" --add-label enhancement ;;
+            fix/*) gh pr edit "$PR" --add-label bug ;;
+            *) echo "No label for $BRANCH: a patch release unless labelled by hand." ;;
+          esac
+
+  # After a merge: update the draft of the next release (.github/release-drafter.yml).
+  draft:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

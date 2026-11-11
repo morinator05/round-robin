@@ -105,7 +105,7 @@ the floor speaker setting a new one) logs out all other devices.
 ## Running it
 
 - **On a server:** the Docker image behind your reverse proxy (HTTPS). It updates itself
-  every night to the newest release. Setup, settings, releases and backups:
-  [docs/deployment.md](docs/deployment.md).
+  every night to the newest 1.x release; a breaking 2.0 only once someone switches it over.
+  Setup, settings, releases and backups: [docs/deployment.md](docs/deployment.md).
 - **Development:** local setup, tests and a map of the code:
   [docs/development.md](docs/development.md).

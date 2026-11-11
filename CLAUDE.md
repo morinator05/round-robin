@@ -21,17 +21,19 @@ uv run ruff check . && uv run ruff format --check .   # lint as in CI
 uv run alembic revision --autogenerate -m "..."      # migration after changing models.py
 uv run python -m scripts.seed [--days 30]  # test residents (+ a simulated month on an empty DB)
 uv run python -m scripts.create_admin      # first floor speaker (admin) account
-gh release create v1.3.0 --generate-notes  # release: publishes the image, servers update at night
+gh release edit v1.3.1 --draft=false       # release the draft (version from PR labels)
 ```
 
 CI (`.github/workflows/ci.yml`) runs ruff and pytest against Postgres 16. With `CI` set, an
 unreachable database is an error instead of a skip. Its `image` job builds the Docker
 image on amd64 and arm64 and starts it against an empty database (migrations apply,
 `/login` answers); `publish` runs only on `v*` tags and pushes the image to GHCR with the
-tag as `APP_VERSION` (shown on the admin page). The Docker image runs
+tag as `APP_VERSION` (shown on the admin page). `release-drafter.yml` labels PRs from the
+branch name (`feature/` → `enhancement` = minor, `fix/` → `bug` = patch; `breaking` = major,
+by hand) and keeps a draft of the next release on main. The Docker image runs
 `alembic upgrade head` on every start. Servers run `deploy/update.sh` nightly (systemd
-timer): pull `latest`, check out its release tag, `pg_dump`, restart; see
-`docs/deployment.md`.
+timer): pull their major version's tag (`1`), check out its release tag, `pg_dump`,
+restart; see `docs/deployment.md`.
 
 ## Architecture
 
