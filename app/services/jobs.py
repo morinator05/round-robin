@@ -47,3 +47,12 @@ async def scheduled_tick() -> None:
     async with db.SessionLocal() as session:
         await daily_tick(session, settings.now())
     await telegram.scheduled_announce()
+
+
+async def catch_up() -> None:
+    """Every quarter of an hour after the daily job (scheduler): runs it if today's trips
+    are still missing (e.g. it failed at the deadline hour), then the Telegram post if
+    that's still due. Does nothing otherwise."""
+    async with db.SessionLocal() as session:
+        await current_trips(session, settings.now())
+    await telegram.scheduled_announce()

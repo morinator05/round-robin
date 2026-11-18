@@ -1,5 +1,6 @@
 """App settings, read from environment variables or `.env` (names are case-insensitive)."""
 
+import re
 from datetime import date, datetime
 from functools import cached_property
 from zoneinfo import ZoneInfo
@@ -11,7 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """All settings with their defaults."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # hide_input_in_errors: an invalid setting's error names it but doesn't show its value,
+    # so a mistyped secret (key, bot token) doesn't end up in the log.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     database_url: str = "postgresql+asyncpg://e1:e1@localhost:5432/e1"
     # Signs the login cookie: whoever knows it can log in as anyone. No usable default on purpose.
@@ -77,6 +80,24 @@ class Settings(BaseSettings):
         if not 0 <= value <= 23:
             raise ValueError("DEADLINE_HOUR must be between 0 and 23")
         return value
+
+    @field_validator("telegram_bot_token")
+    @classmethod
+    def bot_token_format(cls, value: str) -> str:
+        """Empty (off), or a token like 123456:ABC-def from @BotFather. Spaces and line
+        breaks around it (e.g. pasted along) are dropped."""
+        value = value.strip()
+        if value and not re.fullmatch(r"\d+:[A-Za-z0-9_-]+", value):
+            raise ValueError(
+                "TELEGRAM_BOT_TOKEN must be a bot token from @BotFather, like 123456:ABC-def"
+            )
+        return value
+
+    @field_validator("telegram_chat_id")
+    @classmethod
+    def strip_chat_id(cls, value: str) -> str:
+        """The chat id without spaces around it."""
+        return value.strip()
 
     @field_validator("telegram_thread_id", mode="before")
     @classmethod
