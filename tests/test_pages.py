@@ -396,6 +396,10 @@ async def test_admin_needs_attention_and_keep_missed(session, browser, clock, mo
     assert "Version development" in page
     monkeypatch.setattr(settings, "app_version", "v1.3.0")
     assert "Version v1.3.0" in words(await admin.get("/admin"))
+    # Telegram is off until it's set up (docs/deployment.md).
+    assert "Telegram: off" in page and "Send test message" not in page
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram isn't set up" in page
 
     # Yesterday's kitchen duty nobody marked (missed by now), and today's (still open).
     late = await kitchen_pair(session, people, clock.today - timedelta(days=1))
@@ -511,9 +515,23 @@ async def test_admin_absences(session, browser, clock):
     assert away_id not in set(await session.scalars(select(AwayPeriod.id)))
 
 
-async def test_admin_strike_and_duty_lists(session, browser, clock):
+async def test_admin_strike_and_duty_lists(session, browser, clock, bot):
     people = await make_users(session, n=4)
     admin = await browser("p1")
+    # With Telegram set up, a test message shows whether the bot can post in the group.
+    assert "Telegram: on" in words(await admin.get("/admin"))
+    assert "Test message sent" in await follow(admin, await admin.post("/admin/telegram/test"))
+    [test] = bot.texts
+    assert test.startswith("Test message from Round Robin") and "the bot can post here" in test
+    bot.error = "Bad Request: chat not found"
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram refused the message: Bad Request: chat not found" in page
+    bot.error, bot.down = None, True
+    page2 = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram can't be reached" in page2 and len(bot.texts) == 1
+    # The bot token is a password: no error message shows it.
+    assert bot.token not in page and bot.token not in page2
+    bot.down = False
     # Empty lists are a plain sentence, not a table with only a header.
     page = await admin.get("/admin")
     for part, sentence in [

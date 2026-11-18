@@ -6,7 +6,7 @@ import pytest
 
 from app.config import settings
 from app.models import AwayPeriod, Duty, Status
-from app.services import duties, jobs, strikes, users
+from app.services import duties, jobs, strikes, telegram, users
 from tests.helpers import (
     MONDAY,
     NEXT_MONDAY,
@@ -19,7 +19,7 @@ from tests.helpers import (
 )
 
 
-async def test_penalty_week(session):
+async def test_penalty_week(session, bot):
     people = await make_users(session)
     a, b = people[1], people[2]
     await jobs.daily_tick(session, at(MONDAY))
@@ -36,6 +36,10 @@ async def test_penalty_week(session):
     await jobs.daily_tick(session, at(NEXT_MONDAY))
     trip = await duties.get_trip(session, Duty.trash, NEXT_MONDAY)
     assert trip.is_penalty and [pd.user_id for pd in trip.potential_drivers] == [a.id]
+    # The bot's post that Monday says so.
+    await telegram.announce_morning(session, at(NEXT_MONDAY))
+    [trash_line] = [line for line in bot.texts[0].splitlines() if line.startswith("Trash")]
+    assert f": {a.display_name} (penalty week). Mark it done by" in trash_line
     pd = await duties.get_potential_driver(session, trip.potential_drivers[0].id)
     await duties.mark_as_driver(session, pd, a, at(NEXT_MONDAY, 20))
     await session.commit()

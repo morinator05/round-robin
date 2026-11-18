@@ -5,10 +5,11 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import db
 from app.config import settings
-from app.db import Lock, SessionLocal, advisory_lock
+from app.db import Lock, advisory_lock
 from app.models import Duty, Trip
-from app.services import duties
+from app.services import duties, telegram
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ async def current_trips(session: AsyncSession, now: datetime) -> dict[Duty, Trip
 
 
 async def scheduled_tick() -> None:
-    """`daily_tick` with its own session, for the scheduler (no request around it)."""
-    async with SessionLocal() as session:
+    """`daily_tick` with its own session, for the scheduler (no request around it), then
+    the morning post on Telegram (`telegram.announce_morning`), if it's set up.
+
+    Only from here, not from the dashboard or the admin page: no page waits for Telegram.
+    """
+    async with db.SessionLocal() as session:
         await daily_tick(session, settings.now())
+    await telegram.scheduled_announce()

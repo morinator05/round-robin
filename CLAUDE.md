@@ -105,9 +105,19 @@ but on a trip whose days are over only removed (nobody new gets a past duty, and
 `fill_current` never tops one up). Away pending potential drivers keep their duty. Deleting
 an absence or resuming someone makes them a rider again (`duties.add_riders`).
 
+**Telegram.** `app/services/telegram.py` only sends (Bot API `sendMessage` via httpx; tests
+replace its module-level `transport`). `announce_morning` posts today's duties once a day
+after the daily job, from `jobs.scheduled_tick` (8:05, startup) and a 15-minute retry job,
+never from page requests; an `Announcement` row (unique kind + day, with Telegram's
+`message_id`) makes it idempotent under `Lock.telegram`. It is off unless
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; conftest forces them empty and fails
+any real request, the `bot` fixture fakes Telegram. httpx's logger stays at WARNING: its
+INFO lines contain the token.
+
 **Layers.**
-- `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
-  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, all in
+- `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick` and
+  `telegram.announce_morning`).
+  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, `TelegramError`, all in
   `services/errors.py`) with an English, user-facing message. Advisory locks:
   `db.advisory_lock(session, Lock.trips)`.
 - `app/web/`: the routes, one module per page (`login`, `dashboard`, `profile`, `pages`,

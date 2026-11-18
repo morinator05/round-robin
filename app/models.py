@@ -5,6 +5,7 @@ import secrets
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -262,3 +263,21 @@ class Strike(Base):
     def is_active(self) -> bool:
         """Counts towards the penalty threshold: neither revoked nor paid off."""
         return self.revoked_at is None and self.redeemed_by_trip_id is None
+
+
+class Announcement(Base):
+    """A post of the Telegram bot in the floor's group (`services/telegram`).
+
+    One of each kind a day; the row says it was posted, so it isn't posted twice.
+    """
+
+    __tablename__ = "announcements"
+    __table_args__ = (UniqueConstraint("kind", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # What was posted: "morning", the day's duties.
+    kind: Mapped[str] = mapped_column(String(20))
+    day: Mapped[date] = mapped_column(Date)
+    # Telegram's id of the message in the chat, to change it later.
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

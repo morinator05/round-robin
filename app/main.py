@@ -12,10 +12,10 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app import db
 from app.config import settings
-from app.db import SessionLocal
 from app.deps import SESSION_MAX_SECONDS, LoginRequired
-from app.services import users
+from app.services import telegram, users
 from app.services.jobs import scheduled_tick
 from app.web import public, router
 
@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Creates the first floor speaker if configured, then runs the daily job once on startup
     and on a schedule while the app is up."""
-    async with SessionLocal() as session:
+    async with db.SessionLocal() as session:
         # Invalid ADMIN_* settings stop the startup, like a missing SECRET_KEY does.
         admin = await users.create_initial_admin(session)
         if admin:
@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI):
         # If the job couldn't run on time (e.g. a suspended host), run it once as soon as
         # possible instead of skipping it.
         scheduler.add_job(scheduled_tick, trigger, misfire_grace_time=None, coalesce=True)
+        if settings.telegram_enabled:
+            # Posts the morning's duties if Telegram couldn't be reached right after the
+            # daily job; once it's out, this does nothing for the rest of the day.
+            retry = CronTrigger(minute="*/15", timezone=settings.tz)
+            scheduler.add_job(telegram.scheduled_announce, retry, coalesce=True)
         scheduler.start()
         try:
             await scheduled_tick()

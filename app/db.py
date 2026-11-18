@@ -26,6 +26,8 @@ class Lock(enum.IntEnum):
     # Creating and reassigning trips: the daily job and admin actions can't both create
     # the same trip, or choose a penalty week someone else is choosing.
     trips = 4004
+    # Posting on Telegram: the scheduler's job and its retry don't both post the same day.
+    telegram = 4006
 
 
 async def advisory_lock(session: AsyncSession, lock: Lock) -> None:
