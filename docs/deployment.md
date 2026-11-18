@@ -69,25 +69,37 @@ All in `.env`; `.env.example` has them with comments.
 ## Telegram
 
 Optionally, a Telegram bot posts every morning right after the daily job (8:05) who is on
-kitchen duty today and, on Mondays, who has the week's trash duty (also a penalty week),
-plus the new dishwasher heroes on the 1st:
+kitchen duty today, the week's trash duty in the week's first post (on Mondays, normally),
+and the new dishwasher heroes on the 1st:
 
 ```
 Kitchen duty today, Wed 18 Nov: Picard (E101) and Riker (E102). One of you cleans and marks it done by 08:00 tomorrow.
 https://duties.example.org
 ```
 
-Names and rooms go to everyone in that group. If Telegram can't be reached, the app tries
-again every 15 minutes the same day; an old day's post is never sent afterwards.
+Everyone in that group sees the names and rooms, and that a trash week is a penalty week.
+If Telegram can't be reached (or the daily job failed), the app tries again every 15
+minutes until midnight; an old day's post is never sent afterwards. Failures are in the
+app's log: `sudo docker compose logs app | grep -i telegram`.
 
 1. In Telegram, ask [@BotFather](https://t.me/BotFather) for `/newbot`. It answers with the
    bot's token (`123456:ABC…`): `TELEGRAM_BOT_TOKEN`. Whoever has it can post as the bot.
-2. Add the bot to the floor's group. It only needs to send messages.
+2. If the bot should post in a topic, turn on topics in the group first: that turns it into
+   a supergroup with a new id. Then add the bot to the group. It only needs to send
+   messages (if members can't post, or the topic is closed, make it an admin).
 3. Send `/start@<botname>` in the group, in the topic if it should post in one (bots only
-   see commands addressed to them). Then open
-   `https://api.telegram.org/bot<token>/getUpdates` in a browser: `"chat":{"id":…}` is
-   `TELEGRAM_CHAT_ID` (`-100…` for most groups), `"message_thread_id"` the topic's
-   `TELEGRAM_THREAD_ID`.
+   see commands addressed to them). Then fetch the bot's updates:
+
+   ```bash
+   curl https://api.telegram.org/bot<token>/getUpdates
+   ```
+
+   (curl rather than a browser, which would keep the token in its history.)
+   `"chat":{"id":…}` is `TELEGRAM_CHAT_ID` (`-100…` for supergroups). If the message has
+   `"is_topic_message":true`, its `"message_thread_id"` is the topic's
+   `TELEGRAM_THREAD_ID`. Leave that empty for the main chat, also for a group's "General"
+   topic; replies carry a `message_thread_id` too, but it isn't a topic. Telegram keeps
+   updates for 24 hours only: if the answer is `"result":[]`, send the command again.
 4. Put them in `.env`, optionally `APP_URL` too, and restart:
    `sudo docker compose up -d app`.
 5. On the admin page, "Send test message" shows whether it works, or why not.
