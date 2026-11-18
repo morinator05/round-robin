@@ -28,6 +28,8 @@ class Lock(enum.IntEnum):
     trips = 4004
     # Marking the dishwasher: two clicks at once, the second waits and sees the first.
     dishwasher = 4005
+    # Posting on Telegram: the scheduler's job and its retry don't both post the same day.
+    telegram = 4006
 
 
 async def advisory_lock(session: AsyncSession, lock: Lock) -> None:

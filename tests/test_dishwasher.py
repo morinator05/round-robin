@@ -6,7 +6,7 @@ import pytest
 
 from app.config import settings
 from app.models import Duty
-from app.services import carpool, dishwasher, duties, jobs, users
+from app.services import carpool, dishwasher, duties, jobs, telegram, users
 from app.services.dishwasher import DishwasherError
 from tests.helpers import MONDAY, NOVEMBER, OCTOBER, at, make_users, planned, plans, reload_trip
 
@@ -92,7 +92,7 @@ async def test_dishwasher_heroes_are_the_top_of_last_month(session):
     assert await standings(session, NOVEMBER) == [(b.id, 1)]
 
 
-async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session):
+async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session, bot, monkeypatch):
     people = await make_users(session, n=4)
     admin, a, b = people[0], people[1], people[2]
     heroes = {a.id, b.id}
@@ -100,6 +100,21 @@ async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session):
 
     # The preview leaves them out too, once November's heroes are known.
     await jobs.daily_tick(session, at(NOVEMBER))
+    # The bot names them in its post on the 1st (a Sunday, so no trash line). Here it
+    # posts to the group itself, not a topic of it, and there's no link to the app.
+    monkeypatch.setattr(settings, "telegram_thread_id", None)
+    monkeypatch.setattr(settings, "app_url", "")
+    await telegram.announce_morning(session, at(NOVEMBER))
+    kitchen = await duties.get_trip(session, Duty.kitchen, NOVEMBER)
+    by_id = {p.id: p for p in people}
+    on_duty = " and ".join(by_id[pd.user_id].display_name for pd in kitchen.potential_drivers)
+    assert bot.texts[0].splitlines() == [
+        f"Kitchen duty today, Sun 1 Nov: {on_duty}. "
+        "One of you cleans and marks it done by 08:00 tomorrow.",
+        f"Dishwasher heroes of October: {a.display_name} and {b.display_name}. "
+        "No kitchen duty for them in November.",
+    ]
+    assert "message_thread_id" not in bot.sent[0]
     november = planned(await plans(session, NOVEMBER))
     assert november and not heroes & november
     in_october = await duties.preview(
@@ -132,5 +147,8 @@ async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session):
 
     # December: back on kitchen duty.
     await jobs.daily_tick(session, at(date(2026, 12, 1)))
+    # Nobody emptied it in November: no heroes to announce.
+    await telegram.announce_morning(session, at(date(2026, 12, 1)))
+    assert "heroes" not in bot.texts[-1]
     december = await reload_trip(session, Duty.kitchen, date(2026, 12, 1))
     assert heroes <= {r.user_id for r in december.riders}

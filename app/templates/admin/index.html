@@ -127,6 +127,14 @@
     <button class="secondary">Run daily job now</button>
     <span class="muted">Runs by itself every day at {{ assign_time }}.</span>
   </form>
+  {% if telegram_on %}
+  <form method="post" action="/admin/telegram/test" class="actions">
+    <button class="secondary">Send test message</button>
+    <span class="muted">Telegram: on. The bot posts the day's duties in the floor's group at {{ assign_time }}.</span>
+  </form>
+  {% else %}
+  <p class="muted">Telegram: off. To post the day's duties in the floor's group, set up the bot (<code>docs/deployment.md</code>).</p>
+  {% endif %}
 </section>
 
 {% macro strike_rows(rows) %}

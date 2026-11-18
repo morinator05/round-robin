@@ -16,8 +16,14 @@ os.environ.update(
     DISHWASHER_COOLDOWN_MINUTES="90",
     DISHWASHER_HEROES="2",
     APP_VERSION="",
+    # Never post to a real Telegram group from the tests; the `bot` fixture fakes one.
+    TELEGRAM_BOT_TOKEN="",
+    TELEGRAM_CHAT_ID="",
+    APP_URL="",
+    FLOOR_NAME="",
 )
 
+import json  # noqa: E402
 from contextlib import AsyncExitStack  # noqa: E402
 
 import asyncpg  # noqa: E402
@@ -32,7 +38,7 @@ from app import db  # noqa: E402
 from app.config import settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Base  # noqa: E402
-from app.services import login_throttle  # noqa: E402
+from app.services import login_throttle, telegram  # noqa: E402
 from app.services.login_throttle import (  # noqa: E402
     ACCOUNT_MAX_FAILURES,
     MAX_FAILURES,
@@ -145,3 +151,61 @@ async def browser(session_factory, clock):
 async def client(browser):
     """A browser that isn't logged in."""
     return await browser()
+
+
+class FakeTelegram:
+    """The Telegram Bot API, with the app set up to post through it to a group's topic.
+
+    Records the messages the bot sends. `error` makes Telegram refuse them with that
+    description, `down` makes it unreachable.
+    """
+
+    token = "123456:test-token"
+    chat_id = "-1001234"
+    thread_id = 7
+
+    def __init__(self, monkeypatch):
+        self.sent: list[dict] = []
+        self.error: str | None = None
+        self.down = False
+        monkeypatch.setattr(settings, "telegram_bot_token", self.token)
+        monkeypatch.setattr(settings, "telegram_chat_id", self.chat_id)
+        monkeypatch.setattr(settings, "telegram_thread_id", self.thread_id)
+        monkeypatch.setattr(settings, "app_url", "https://duties.example.org")
+        monkeypatch.setattr(telegram, "transport", httpx.MockTransport(self.handle))
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert str(request.url) == f"https://api.telegram.org/bot{self.token}/sendMessage"
+        if self.down:
+            raise httpx.ConnectError("Network is unreachable", request=request)
+        if self.error:
+            body = {"ok": False, "error_code": 400, "description": self.error}
+            return httpx.Response(400, json=body)
+        message = json.loads(request.content)
+        assert message["chat_id"] == self.chat_id
+        # Into the group's topic, if one is set.
+        assert message.get("message_thread_id") == settings.telegram_thread_id
+        self.sent.append(message)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": len(self.sent)}})
+
+    @property
+    def texts(self) -> list[str]:
+        """The text of each message sent, in order."""
+        return [m["text"] for m in self.sent]
+
+
+@pytest.fixture(autouse=True)
+def no_real_telegram(monkeypatch):
+    """Tests never talk to the real Telegram; `bot` replaces this with a fake one."""
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        # Not an assertion: `Failed` isn't an `Exception`, so no `except` in the app hides it.
+        pytest.fail(f"real Telegram request: {request.method} {request.url.path}")
+
+    monkeypatch.setattr(telegram, "transport", httpx.MockTransport(refuse))
+
+
+@pytest.fixture
+def bot(no_real_telegram, monkeypatch) -> FakeTelegram:
+    return FakeTelegram(monkeypatch)
