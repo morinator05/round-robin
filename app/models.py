@@ -275,7 +275,8 @@ class Announcement(Base):
     __table_args__ = (UniqueConstraint("kind", "day"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # What was posted: "morning", the day's duties.
+    # What was posted: "morning", the day's duties; "trash", the week's trash duty (in a
+    # morning post). `day` is the day, or the week's first day.
     kind: Mapped[str] = mapped_column(String(20))
     day: Mapped[date] = mapped_column(Date)
     # Telegram's id of the message in the chat, to change it later.

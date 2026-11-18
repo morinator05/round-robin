@@ -180,17 +180,22 @@ async def test_dishwasher_heroes_get_a_month_off_kitchen_duty(session, bot, monk
 
     # The preview leaves them out too, once November's heroes are known.
     await jobs.daily_tick(session, at(NOVEMBER))
-    # The bot names them in its post on the 1st (a Sunday, so no trash line). Here it
-    # posts to the group itself, not a topic of it, and there's no link to the app.
+    # The bot names them in its post on the 1st. It's the first post of that trash week
+    # (a Sunday), so the week's trash duty is in it too. Here it posts to the group
+    # itself, not a topic of it, and there's no link to the app.
     monkeypatch.setattr(settings, "telegram_thread_id", None)
     monkeypatch.setattr(settings, "app_url", "")
     await telegram.announce_morning(session, at(NOVEMBER))
     kitchen = await duties.get_trip(session, Duty.kitchen, NOVEMBER)
+    trash = await duties.get_trip(session, Duty.trash, NOVEMBER)
     by_id = {p.id: p for p in people}
     on_duty = " and ".join(by_id[pd.user_id].display_name for pd in kitchen.potential_drivers)
     assert bot.texts[0].splitlines() == [
         f"Kitchen duty today, Sun 1 Nov: {on_duty}. "
         "One of you cleans and marks it done by 08:00 tomorrow.",
+        f"Trash duty this week, Mon 26 Oct–1 Nov: "
+        f"{by_id[trash.potential_drivers[0].user_id].display_name}. "
+        "Mark it done by 08:00 tomorrow.",
         f"Dishwasher heroes of October: {a.display_name} and {b.display_name}. "
         "No kitchen duty for them in November.",
     ]

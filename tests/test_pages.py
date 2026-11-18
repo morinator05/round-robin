@@ -4,10 +4,12 @@ import html
 import re
 from datetime import timedelta
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from starlette.routing import Route
 
-from app.config import settings
+from app.config import Settings, settings
 from app.formatting import long_date, short_date
 from app.main import app
 from app.models import AwayPeriod, DishwasherClear, Duty, PotentialDriver, Status, User
@@ -531,7 +533,17 @@ async def test_admin_strike_and_duty_lists(session, browser, clock, bot):
     assert "Telegram can't be reached" in page2 and len(bot.texts) == 1
     # The bot token is a password: no error message shows it.
     assert bot.token not in page and bot.token not in page2
-    bot.down = False
+    bot.down, bot.answer = False, {"ok": True}
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram sent an answer that makes no sense" in page
+    bot.answer = None
+    # A token that can't be one (e.g. a tab pasted along) stops the start, with a message
+    # that doesn't show it.
+    with pytest.raises(ValidationError) as error:
+        Settings(telegram_bot_token="123456:abc\tdef")
+    assert "TELEGRAM_BOT_TOKEN" in str(error.value) and "abc" not in str(error.value)
+    assert Settings(telegram_bot_token=" 123456:AB-c_d\n").telegram_bot_token == "123456:AB-c_d"
+    assert Settings(telegram_chat_id=" -1001 ").telegram_chat_id == "-1001"
     # Empty lists are a plain sentence, not a table with only a header.
     page = await admin.get("/admin")
     for part, sentence in [

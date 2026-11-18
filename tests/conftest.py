@@ -158,7 +158,9 @@ class FakeTelegram:
     """The Telegram Bot API, with the app set up to post through it to a group's topic.
 
     Records the messages the bot sends. `error` makes Telegram refuse them with that
-    description, `down` makes it unreachable.
+    description, `down` makes it unreachable, `answer` replaces its answer. A wrong
+    request fails the test with `pytest.fail`: the app's `except Exception` (the
+    scheduler's jobs) would swallow an `AssertionError`.
     """
 
     token = "123456:test-token"
@@ -169,6 +171,7 @@ class FakeTelegram:
         self.sent: list[dict] = []
         self.error: str | None = None
         self.down = False
+        self.answer: dict | None = None
         monkeypatch.setattr(settings, "telegram_bot_token", self.token)
         monkeypatch.setattr(settings, "telegram_chat_id", self.chat_id)
         monkeypatch.setattr(settings, "telegram_thread_id", self.thread_id)
@@ -176,17 +179,21 @@ class FakeTelegram:
         monkeypatch.setattr(telegram, "transport", httpx.MockTransport(self.handle))
 
     def handle(self, request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
-        assert str(request.url) == f"https://api.telegram.org/bot{self.token}/sendMessage"
+        url = f"https://api.telegram.org/bot{self.token}/sendMessage"
+        if request.method != "POST" or str(request.url) != url:
+            pytest.fail(f"unexpected Telegram request: {request.method} {request.url.path}")
         if self.down:
             raise httpx.ConnectError("Network is unreachable", request=request)
         if self.error:
             body = {"ok": False, "error_code": 400, "description": self.error}
             return httpx.Response(400, json=body)
+        if self.answer is not None:
+            return httpx.Response(200, json=self.answer)
         message = json.loads(request.content)
-        assert message["chat_id"] == self.chat_id
-        # Into the group's topic, if one is set.
-        assert message.get("message_thread_id") == settings.telegram_thread_id
+        # To the group, into its topic if one is set.
+        where = (message["chat_id"], message.get("message_thread_id"))
+        if where != (self.chat_id, settings.telegram_thread_id):
+            pytest.fail(f"posted to chat {where[0]}, topic {where[1]}")
         self.sent.append(message)
         return httpx.Response(200, json={"ok": True, "result": {"message_id": len(self.sent)}})
 

@@ -96,9 +96,10 @@ today's trips, and commits. A day's (on Monday the week's) trip is only material
 `duties.choose_at` on: the deadline hour of its first day, right after the previous trip's
 deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
 Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
-startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
-the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay
-idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
+startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and when
+the current trips are missing (`jobs.current_trips`): from the dashboard, and from
+`jobs.catch_up` every 15 minutes after the deadline hour until midnight (if the 8:05 run
+failed). So it must stay idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
 every trip still open (yesterday's too, until its deadline): whoever no longer rides stops
 being a rider of undriven trips; paused and deleted pending potential drivers are replaced,
 but on a trip whose days are over only removed (nobody new gets a past duty, and
@@ -107,9 +108,12 @@ an absence or resuming someone makes them a rider again (`duties.add_riders`).
 
 **Telegram.** `app/services/telegram.py` only sends (Bot API `sendMessage` via httpx; tests
 replace its module-level `transport`). `announce_morning` posts today's duties once a day
-after the daily job, from `jobs.scheduled_tick` (8:05, startup) and a 15-minute retry job,
-never from page requests; an `Announcement` row (unique kind + day, with Telegram's
-`message_id`) makes it idempotent under `Lock.telegram`. It is off unless
+after the daily job, from `jobs.scheduled_tick` (8:05), `jobs.catch_up` (every 15 minutes
+until midnight) and, in the background, on startup; never from page requests. It names only
+pending potential drivers, or who drove it. `Announcement` rows (unique kind + day, with
+Telegram's `message_id`) make it idempotent under `Lock.telegram`: `morning` per day, and
+`trash` per week (its start date), so the week's trash duty comes with the week's first
+post that goes out. It is off unless
 `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; conftest forces them empty and fails
 any real request, the `bot` fixture fakes Telegram. httpx's logger stays at WARNING: its
 INFO lines contain the token.
