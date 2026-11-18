@@ -55,7 +55,8 @@ Releases are described in [deployment.md](deployment.md#releasing-a-version).
 ## Code
 
 - `app/services/carpool.py`: the fairness logic, without database (start reading here)
-- `app/services/`: the other rules (duties, strikes, dishwasher, users, login, daily job)
+- `app/services/`: the other rules (duties, strikes, dishwasher, users, login, daily job,
+  the Telegram bot's morning post)
 - `app/web/`: pages and form actions, one module per page; templates in `app/templates/`
 - `app/models.py`: database tables; migrations in `migrations/`
 - `scripts/`: create the first floor speaker, add test residents

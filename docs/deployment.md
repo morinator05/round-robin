@@ -60,8 +60,37 @@ All in `.env`; `.env.example` has them with comments.
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, created on startup only while there are no users (so a deleted admin doesn't come back). |
 | `SECURE_COOKIES` | `false` | Send the login cookie only over HTTPS. Turn on behind TLS. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | – | Optional Telegram bot that posts each morning's duties in the floor's group, see [Telegram](#telegram). |
+| `TELEGRAM_THREAD_ID` | – | Optional topic of that group to post in; without it, the main chat. |
+| `APP_URL` | – | Optional address of the app, linked at the end of each post. |
 | `APP_IMAGE` | `…:1` (newest 1.x) | Server only: the image to follow. `ghcr.io/morinator05/round-robin:2` for the next major version, `…:1.2.0` to stay on one version. |
 | `APP_BIND` | `127.0.0.1` | Where the app's port 8000 is reachable. Local only, for the reverse proxy. |
+
+## Telegram
+
+Optionally, a Telegram bot posts every morning right after the daily job (8:05) who is on
+kitchen duty today and, on Mondays, who has the week's trash duty (also a penalty week),
+plus the new dishwasher heroes on the 1st:
+
+```
+Kitchen duty today, Wed 18 Nov: Picard (E101) and Riker (E102). One of you cleans and marks it done by 08:00 tomorrow.
+https://duties.example.org
+```
+
+Names and rooms go to everyone in that group. If Telegram can't be reached, the app tries
+again every 15 minutes the same day; an old day's post is never sent afterwards.
+
+1. In Telegram, ask [@BotFather](https://t.me/BotFather) for `/newbot`. It answers with the
+   bot's token (`123456:ABC…`): `TELEGRAM_BOT_TOKEN`. Whoever has it can post as the bot.
+2. Add the bot to the floor's group. It only needs to send messages.
+3. Send `/start@<botname>` in the group, in the topic if it should post in one (bots only
+   see commands addressed to them). Then open
+   `https://api.telegram.org/bot<token>/getUpdates` in a browser: `"chat":{"id":…}` is
+   `TELEGRAM_CHAT_ID` (`-100…` for most groups), `"message_thread_id"` the topic's
+   `TELEGRAM_THREAD_ID`.
+4. Put them in `.env`, optionally `APP_URL` too, and restart:
+   `sudo docker compose up -d app`.
+5. On the admin page, "Send test message" shows whether it works, or why not.
 
 ## Reverse proxy
 
