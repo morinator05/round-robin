@@ -5,6 +5,7 @@ import secrets
 from datetime import date, datetime
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -206,7 +207,11 @@ class PotentialDriver(Base):
 
 class DishwasherClear(Base):
     """Someone emptied the dishwasher. Each month's top ones become dishwasher heroes
-    (`services/dishwasher`)."""
+    (`services/dishwasher`).
+
+    Valid unless the floor speaker disputed it; whether it's suspicious is worked out, not
+    stored (`dishwasher.suspicious`).
+    """
 
     __tablename__ = "dishwasher_clears"
 
@@ -216,8 +221,16 @@ class DishwasherClear(Base):
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
     cleared_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # When and by whom the floor speaker disputed it: it stays in the list but doesn't count.
+    disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disputed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    # When and by whom the floor speaker checked it and found it valid (only one of the two).
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
-    user: Mapped[User | None] = relationship()
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
+    disputed_by: Mapped[User | None] = relationship(foreign_keys=[disputed_by_id])
+    confirmed_by: Mapped[User | None] = relationship(foreign_keys=[confirmed_by_id])
 
 
 class Strike(Base):
@@ -250,3 +263,22 @@ class Strike(Base):
     def is_active(self) -> bool:
         """Counts towards the penalty threshold: neither revoked nor paid off."""
         return self.revoked_at is None and self.redeemed_by_trip_id is None
+
+
+class Announcement(Base):
+    """A post of the Telegram bot in the floor's group (`services/telegram`).
+
+    One of each kind a day; the row says it was posted, so it isn't posted twice.
+    """
+
+    __tablename__ = "announcements"
+    __table_args__ = (UniqueConstraint("kind", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # What was posted: "morning", the day's duties; "trash", the week's trash duty (in a
+    # morning post). `day` is the day, or the week's first day.
+    kind: Mapped[str] = mapped_column(String(20))
+    day: Mapped[date] = mapped_column(Date)
+    # Telegram's id of the message in the chat, to change it later.
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

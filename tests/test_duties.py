@@ -1,5 +1,6 @@
 """Duties against a real database: choosing, deadlines, marking done, undo, preview."""
 
+import logging
 import random
 from datetime import date, timedelta
 from fractions import Fraction
@@ -9,7 +10,7 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.models import AwayPeriod, Duty, Status, Trip, User
-from app.services import carpool, duties, jobs, strikes, users
+from app.services import carpool, duties, jobs, strikes, telegram, users
 from app.services.duties import DutyError
 from tests.helpers import (
     MONDAY,
@@ -25,8 +26,10 @@ from tests.helpers import (
 )
 
 
-async def test_daily_tick_and_deadlines(session):
-    await make_users(session)
+async def test_daily_tick_and_deadlines(session, bot, clock, caplog):
+    caplog.set_level(logging.INFO)
+    people = await make_users(session)
+    by_id = {p.id: p for p in people}
     hour = settings.deadline_hour
     await jobs.daily_tick(session, at(MONDAY, hour))
     monday = await duties.get_trip(session, Duty.kitchen, MONDAY)
@@ -36,6 +39,25 @@ async def test_daily_tick_and_deadlines(session):
     chosen = [pd.user_id for pd in monday.potential_drivers]
     await jobs.daily_tick(session, at(MONDAY, 13))
     assert len((await session.scalars(select(Trip))).all()) == 2  # idempotent
+
+    # The bot posts the day's duties in the floor's group, once a day: the kitchen pair
+    # and, in the week's first post, the week's trash person, with the deadlines and a
+    # link to the app.
+    assert await telegram.announce_morning(session, at(MONDAY, hour))
+    assert not await telegram.announce_morning(session, at(MONDAY, 13))
+    [text] = bot.texts
+    kitchen_line, trash_line, link = text.splitlines()
+    first, second = (by_id[uid].display_name for uid in chosen)
+    assert kitchen_line == (
+        f"Kitchen duty today, Mon 2 Nov: {first} and {second}. "
+        "One of you cleans and marks it done by 08:00 tomorrow."
+    )
+    trash_person = by_id[trash.potential_drivers[0].user_id].display_name
+    assert trash_line == (
+        f"Trash duty this week, Mon 2 Nov–8 Nov: {trash_person}. Mark it done by 08:00 next Monday."
+    )
+    assert link == "https://duties.example.org"
+    assert bot.sent[0]["link_preview_options"] == {"is_disabled": True}
 
     # Tuesday before the deadline hour: Monday's duty is still the current one, and not
     # missed yet. Nothing chooses Tuesday's yet, not even a floor speaker's action.
@@ -47,8 +69,35 @@ async def test_daily_tick_and_deadlines(session):
     monday = await reload_trip(session, Duty.kitchen, MONDAY)
     assert all(pd.status is Status.pending for pd in monday.potential_drivers)
 
-    # At the deadline hour Monday's is missed, a strike each, before Tuesday's is chosen.
-    await jobs.daily_tick(session, at(TUESDAY, hour))
+    # Before the deadline hour there is nothing new to post, nor right after it until
+    # the daily job has chosen the day's people (it failed, or hasn't run yet).
+    assert not await telegram.announce_morning(session, early)
+    assert not await telegram.announce_morning(session, at(TUESDAY, hour))
+    assert len(bot.texts) == 1
+    # This session holds no lock while the scheduler's own sessions below run.
+    await session.commit()
+
+    # At the deadline hour (the scheduler's job) Monday's is missed, a strike each, before
+    # Tuesday's is chosen. Telegram refusing the post doesn't stop the daily job; the
+    # catch-up job a quarter of an hour later posts it, once. The bot token is a
+    # password: it never shows in the log.
+    clock.set(TUESDAY, hour, 5)
+    bot.error = "Bad Request: chat not found"
+    await jobs.scheduled_tick()
+    assert "chat not found" in caplog.text and len(bot.texts) == 1
+    bot.error = None
+    clock.set(TUESDAY, hour, 20)
+    await jobs.catch_up()
+    await jobs.catch_up()
+    assert len(bot.texts) == 2 and bot.token not in caplog.text
+    tuesday = await duties.get_trip(session, Duty.kitchen, TUESDAY)
+    names = " and ".join(by_id[pd.user_id].display_name for pd in tuesday.potential_drivers)
+    # No trash line on other days.
+    assert bot.texts[1].splitlines() == [
+        f"Kitchen duty today, Tue 3 Nov: {names}. "
+        "One of you cleans and marks it done by 08:00 tomorrow.",
+        "https://duties.example.org",
+    ]
     monday = await reload_trip(session, Duty.kitchen, MONDAY)
     assert all(pd.status is Status.missed for pd in monday.potential_drivers)
     for uid in chosen:
@@ -61,12 +110,31 @@ async def test_daily_tick_and_deadlines(session):
     assert (await duties.current_trip(session, Duty.trash, sunday_night)).id == trash.id
     trash = await reload_trip(session, Duty.trash, MONDAY)
     assert trash.potential_drivers[0].status is Status.pending
-    await jobs.daily_tick(session, at(NEXT_MONDAY, hour))
+
+    # The daily job didn't run at the deadline hour (it failed, say): the catch-up job
+    # runs it. Telegram is down all that day, so the week's trash duty comes with
+    # Tuesday's post instead, and only then.
+    clock.set(NEXT_MONDAY, hour, 20)
+    bot.down = True
+    await jobs.catch_up()
+    assert "Telegram can't be reached" in caplog.text
     trash = await reload_trip(session, Duty.trash, MONDAY)
     assert trash.potential_drivers[0].status is Status.missed
+    assert len((await reload_trip(session, Duty.trash, NEXT_MONDAY)).potential_drivers) == 1
+    assert len(bot.texts) == 2
+    bot.down = False
+    next_tuesday = NEXT_MONDAY + timedelta(days=1)
+    await jobs.daily_tick(session, at(next_tuesday, hour))
+    await telegram.announce_morning(session, at(next_tuesday, hour))
+    [trash_line] = bot.texts[-1].splitlines()[1:2]
+    assert trash_line.startswith("Trash duty this week, Mon 9 Nov–15 Nov: ")
+    assert trash_line.endswith(". Mark it done by 08:00 next Monday.")
+    await jobs.daily_tick(session, at(next_tuesday + timedelta(days=1), hour))
+    await telegram.announce_morning(session, at(next_tuesday + timedelta(days=1), hour))
+    assert "Trash" not in bot.texts[-1]
 
 
-async def test_top_up(session, monkeypatch):
+async def test_top_up(session, monkeypatch, bot):
     """A trip that is short of people gets more as residents move in, but only while it is
     on: not once someone drove it, and not after its day."""
     monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
@@ -74,6 +142,13 @@ async def test_top_up(session, monkeypatch):
     # The daily job ran before anyone lived on the floor.
     await jobs.daily_tick(session, at(MONDAY))
     assert (await duties.get_trip(session, Duty.kitchen, MONDAY)).potential_drivers == []
+    # The bot says so, with no deadline for nobody.
+    await telegram.announce_morning(session, at(MONDAY))
+    assert bot.texts[0].splitlines() == [
+        "Kitchen duty today, Mon 2 Nov: nobody available.",
+        "Trash duty this week, Mon 2 Nov–8 Nov: nobody available.",
+        "https://duties.example.org",
+    ]
     [first] = await make_users(session, n=1)
     await jobs.daily_tick(session, at(MONDAY, 10))
     kitchen = await duties.get_trip(session, Duty.kitchen, MONDAY)
@@ -108,8 +183,18 @@ async def test_top_up(session, monkeypatch):
     await jobs.daily_tick(session, at(WEDNESDAY, hour))
     assert await strikes.active_strikes(session, third.id) == []
 
+    # Three people on it: the bot names them all.
+    by_id = {u.id: u for u in await users.list_users(session)}
+    wednesday = await duties.get_trip(session, Duty.kitchen, WEDNESDAY)
+    a, b, c = (by_id[pd.user_id].display_name for pd in wednesday.potential_drivers)
+    await telegram.announce_morning(session, at(WEDNESDAY, hour))
+    assert bot.texts[-1].splitlines()[0] == (
+        f"Kitchen duty today, Wed 4 Nov: {a}, {b} and {c}. "
+        "One of you cleans and marks it done by 08:00 tomorrow."
+    )
 
-async def test_marking_done(session):
+
+async def test_marking_done(session, bot):
     people = await make_users(session)
     admin = people[0]
     pair = await kitchen_pair(session, people, admin_off=True)
@@ -134,6 +219,10 @@ async def test_marking_done(session):
     with pytest.raises(DutyError):  # closed now
         await duties.mark_as_driver(session, pair.second, pair.p2, at(MONDAY, 21))
     await session.commit()
+    # A post after that (e.g. the server started late) says who did it.
+    await telegram.announce_morning(session, at(MONDAY, 21))
+    kitchen_line = bot.texts[0].splitlines()[0]
+    assert kitchen_line == f"Kitchen duty today, Mon 2 Nov: done by {pair.p1.display_name}."
 
     # One drive for the cleaner, a share (1/14, the floor speaker was away) for every rider.
     balances = await duties.load_balances(session, Duty.kitchen)
@@ -156,7 +245,7 @@ async def test_marking_done(session):
     assert late.status is Status.drove
 
 
-async def test_undo_done(session):
+async def test_undo_done(session, bot):
     people = await make_users(session)
     admin = people[0]
     pair = await kitchen_pair(session, people, admin_off=True)
@@ -183,10 +272,19 @@ async def test_undo_done(session):
     excused = at(MONDAY, 21)
     await duties.excuse(session, pair.first, admin, excused)
     await duties.mark_as_driver(session, pair.first, admin, excused + timedelta(minutes=1))
+    # The bot would say it's done by whose duty it was, not by the floor speaker.
+    trip = await duties.get_trip(session, Duty.kitchen, MONDAY)
+    done_by = telegram.morning_text(trip, None, [], MONDAY).splitlines()[0]
+    assert done_by == f"Kitchen duty today, Mon 2 Nov: done by {pair.p1.display_name}."
     await duties.undo_driver(session, pair.first, admin, excused + timedelta(minutes=2))
     assert pair.first.status is Status.excused
     assert (pair.first.completed_at, pair.first.completed_by_id) == (excused, admin.id)
     assert pair.second.status is Status.pending
+    # A post now names only who still has to do it.
+    await telegram.announce_morning(session, excused + timedelta(minutes=3))
+    assert bot.texts[0].splitlines()[0] == (
+        f"Kitchen duty today, Mon 2 Nov: {pair.p2.display_name}. Mark it done by 08:00 tomorrow."
+    )
 
     # Never after the deadline, not even by the floor speaker.
     deadline = duties.deadline(pair.first.trip)

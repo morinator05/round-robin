@@ -55,13 +55,54 @@ All in `.env`; `.env.example` has them with comments.
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
 | `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
-| `DISHWASHER_COOLDOWN_MINUTES` | `90` | Minutes after an emptying before the next one can be marked. |
+| `DISHWASHER_SUSPICIOUS_COUNT`, `DISHWASHER_SUSPICIOUS_MINUTES` | `3`, `90` | This many dishwasher entries (by anyone) less than these minutes apart are suspicious and show under "Needs attention" on the admin page. Replaces `DISHWASHER_COOLDOWN_MINUTES` (no cooldown any more; an old value in `.env` is ignored). |
 | `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, created on startup only while there are no users (so a deleted admin doesn't come back). |
 | `SECURE_COOKIES` | `false` | Send the login cookie only over HTTPS. Turn on behind TLS. |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | – | Optional Telegram bot that posts each morning's duties in the floor's group, see [Telegram](#telegram). |
+| `TELEGRAM_THREAD_ID` | – | Optional topic of that group to post in; without it, the main chat. |
+| `APP_URL` | – | Optional address of the app, linked at the end of each post. |
 | `APP_IMAGE` | `…:1` (newest 1.x) | Server only: the image to follow. `ghcr.io/morinator05/round-robin:2` for the next major version, `…:1.2.0` to stay on one version. |
 | `APP_BIND` | `127.0.0.1` | Where the app's port 8000 is reachable. Local only, for the reverse proxy. |
+
+## Telegram
+
+Optionally, a Telegram bot posts every morning right after the daily job (8:05) who is on
+kitchen duty today, the week's trash duty in the week's first post (on Mondays, normally),
+and the new dishwasher heroes on the 1st:
+
+```
+Kitchen duty today, Wed 18 Nov: Picard (E101) and Riker (E102). One of you cleans and marks it done by 08:00 tomorrow.
+https://duties.example.org
+```
+
+Everyone in that group sees the names and rooms, and that a trash week is a penalty week.
+If Telegram can't be reached (or the daily job failed), the app tries again every 15
+minutes until midnight; an old day's post is never sent afterwards. Failures are in the
+app's log: `sudo docker compose logs app | grep -i telegram`.
+
+1. In Telegram, ask [@BotFather](https://t.me/BotFather) for `/newbot`. It answers with the
+   bot's token (`123456:ABC…`): `TELEGRAM_BOT_TOKEN`. Whoever has it can post as the bot.
+2. If the bot should post in a topic, turn on topics in the group first: that turns it into
+   a supergroup with a new id. Then add the bot to the group. It only needs to send
+   messages (if members can't post, or the topic is closed, make it an admin).
+3. Send `/start@<botname>` in the group, in the topic if it should post in one (bots only
+   see commands addressed to them). Then fetch the bot's updates:
+
+   ```bash
+   curl https://api.telegram.org/bot<token>/getUpdates
+   ```
+
+   (curl rather than a browser, which would keep the token in its history.)
+   `"chat":{"id":…}` is `TELEGRAM_CHAT_ID` (`-100…` for supergroups). If the message has
+   `"is_topic_message":true`, its `"message_thread_id"` is the topic's
+   `TELEGRAM_THREAD_ID`. Leave that empty for the main chat, also for a group's "General"
+   topic; replies carry a `message_thread_id` too, but it isn't a topic. Telegram keeps
+   updates for 24 hours only: if the answer is `"result":[]`, send the command again.
+4. Put them in `.env`, optionally `APP_URL` too, and restart:
+   `sudo docker compose up -d app`.
+5. On the admin page, "Send test message" shows whether it works, or why not.
 
 ## Reverse proxy
 

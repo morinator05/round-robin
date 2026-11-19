@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.deps import AdminUser, Session
 from app.models import AwayPeriod, DishwasherClear, PotentialDriver, Status, Strike, Trip, User
-from app.services import dishwasher, duties, jobs, strikes, users
+from app.services import dishwasher, duties, jobs, strikes, telegram, users
 from app.services.errors import UserError
 from app.web.common import (
     act,
@@ -38,13 +38,21 @@ class Attention:
     open_now: list[tuple[Trip, PotentialDriver]]
     # Residents one strike or less before a penalty week, with their active strikes.
     near: list[tuple[User, int]]
+    # Dishwasher entries in a burst, not decided yet (`dishwasher.needs_review`).
+    dishwasher: list[DishwasherClear]
 
     def __len__(self) -> int:
-        return len(self.overdue) + len(self.open_now) + len(self.near)
+        return len(self.overdue) + len(self.open_now) + len(self.near) + len(self.dishwasher)
 
 
-def attention(trips: list[Trip], active: list[Strike], residents: list[User], today: date):
-    """The `Attention` list for these trips and active strikes."""
+def attention(
+    trips: list[Trip],
+    active: list[Strike],
+    residents: list[User],
+    clears: list[DishwasherClear],
+    today: date,
+):
+    """The `Attention` list for these trips, active strikes and dishwasher entries."""
     overdue, open_now = [], []
     for trip in trips:
         for pd in trip.potential_drivers:
@@ -54,7 +62,7 @@ def attention(trips: list[Trip], active: list[Strike], residents: list[User], to
                 open_now.append((trip, pd))
     counts = {u.id: sum(s.user_id == u.id for s in active) for u in residents}
     near = [(u, counts[u.id]) for u in residents if strikes.near_penalty(counts[u.id])]
-    return Attention(overdue, open_now, near)
+    return Attention(overdue, open_now, near, dishwasher.needs_review(clears))
 
 
 @router.get("/admin")
@@ -88,6 +96,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         .order_by(AwayPeriod.start_date, AwayPeriod.id)
     )
     open_statuses = (Status.pending, Status.missed)
+    clears = await dishwasher.clears_in_month(session, today)
     return render(
         request,
         "admin/index.html",
@@ -97,14 +106,16 @@ async def admin(request: Request, session: Session, user: AdminUser):
         open_duties=sum(pd.status in open_statuses for t in trips for pd in t.potential_drivers),
         # Duties that ended before this are folded away under "earlier days".
         fold_before=today - timedelta(days=DUTY_DAYS // 2),
-        attention=attention(trips, active, residents, today),
+        attention=attention(trips, active, residents, clears, today),
         active_strikes=active,
         old_strikes=[s for s in all_strikes if not s.is_active],
         aways=list(aways),
-        dishwasher_clears=await dishwasher.clears_in_month(session, today),
+        dishwasher_clears=clears,
+        suspicious=dishwasher.suspicious(clears),
         can_mark=lambda pd: duties.can_mark_as_driver(pd, user, now),
         can_undo=lambda pd: duties.can_undo(pd, user, now),
         version=settings.app_version or "development",
+        telegram_on=settings.telegram_enabled,
     )
 
 
@@ -334,6 +345,34 @@ async def admin_delete_dishwasher(
     return await act(request, session, delete, "/admin")
 
 
+@router.post("/admin/dishwasher/{clear_id}/dispute")
+async def admin_dispute_dishwasher(
+    request: Request, session: Session, user: AdminUser, clear_id: int
+):
+    """Not a real emptying: it stays in the list but no longer counts (current month only)."""
+    clear = await get_or_404(session, DishwasherClear, clear_id)
+
+    async def dispute():
+        await dishwasher.dispute_clear(session, clear, user, settings.now())
+        return "Dishwasher entry disputed, it no longer counts"
+
+    return await act(request, session, dispute, "/admin")
+
+
+@router.post("/admin/dishwasher/{clear_id}/valid")
+async def admin_confirm_dishwasher(
+    request: Request, session: Session, user: AdminUser, clear_id: int
+):
+    """Checked and valid: off "Needs attention", and it counts again if it was disputed."""
+    clear = await get_or_404(session, DishwasherClear, clear_id)
+
+    async def confirm():
+        await dishwasher.confirm_clear(session, clear, user, settings.now())
+        return "Dishwasher entry marked valid"
+
+    return await act(request, session, confirm, "/admin")
+
+
 @router.post("/admin/tick")
 async def admin_tick(request: Request, session: Session, user: AdminUser):
     """Run the daily job now."""
@@ -343,3 +382,14 @@ async def admin_tick(request: Request, session: Session, user: AdminUser):
         return "Daily job done"
 
     return await act(request, session, tick, "/admin")
+
+
+@router.post("/admin/telegram/test")
+async def admin_telegram_test(request: Request, session: Session, user: AdminUser):
+    """Post a test message in the floor's Telegram group, to check the bot's settings."""
+
+    async def test():
+        await telegram.send_test()
+        return "Test message sent"
+
+    return await act(request, session, test, "/admin")

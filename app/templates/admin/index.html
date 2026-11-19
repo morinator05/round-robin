@@ -44,6 +44,30 @@
       <button class="secondary">Keep missed</button></form>
   {%- endif %}
 {%- endmacro %}
+{# A dishwasher entry: when (only this month's are shown, so no year), its status, and the
+   floor speaker's buttons. Valid only while it's disputed or a suspicious one not checked. #}
+{% macro clear_when(c) %}<span class="nowrap">{{ c.cleared_at|local_date|short_date }}</span> {{ c.cleared_at|clock }}{% endmacro %}
+{% macro clear_status(c) %}
+  {%- if c.disputed_at %}<span class="badge s-missed">disputed</span> <span class="muted">by {{ person(c.disputed_by) }}</span>
+  {%- elif c.confirmed_at %}<span class="badge s-drove">valid</span><span class="muted">, checked by {{ person(c.confirmed_by) }}</span>
+  {%- elif c.id in suspicious %}<span class="badge s-pending">suspicious</span>
+  {%- endif %}
+{%- endmacro %}
+{% macro clear_actions(c) %}
+  {%- set whose = c.user.first_name ~ "'s" if c.user else "this" %}
+  {%- if not c.disputed_at %}
+    <form method="post" action="/admin/dishwasher/{{ c.id }}/dispute" class="inline"
+          hx-confirm="Dispute {{ whose }} entry from {{ c.cleared_at|date_time }}? It stays in the list but no longer counts toward the heroes.">
+      <button class="danger">Dispute</button></form>
+  {%- endif %}
+  {%- if c.disputed_at or (c.id in suspicious and not c.confirmed_at) %}
+    <form method="post" action="/admin/dishwasher/{{ c.id }}/valid" class="inline">
+      <button class="secondary">Valid</button></form>
+  {%- endif %}
+    <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"
+          hx-confirm="Delete {{ whose }} entry from {{ c.cleared_at|date_time }}? It won't count toward the heroes.">
+      <button class="secondary">Delete</button></form>
+{%- endmacro %}
 <h1>Admin {{ help_link("floor-speaker") }}</h1>
 <div class="jump" role="navigation" aria-label="Sections">
   <a href="#attention">Needs attention <span class="muted">{{ attention|length }}</span></a>
@@ -73,6 +97,15 @@
     </table></div>
   {% endmacro %}
   {% if attention.overdue %}{{ attention_list("Overdue – decide: done, excused or it stays missed", attention.overdue, "strike given", keep=true) }}{% endif %}
+  {% if attention.dishwasher %}
+    {# A burst of dishwasher entries: they count until the floor speaker disputes one. #}
+    <h3>Dishwasher – {{ dishwasher_suspicious_count }} or more entries within {{ dishwasher_suspicious_minutes }} minutes: ask the residents, then dispute or mark valid</h3>
+    <div class="table-wrap"><table class="compact">
+      {% for c in attention.dishwasher %}
+        <tr><td>{{ clear_when(c) }}</td><td>{{ person(c.user) }}</td><td class="end">{{ clear_actions(c) }}</td></tr>
+      {% endfor %}
+    </table></div>
+  {% endif %}
   {% if attention.open_now %}{{ attention_list("Still open – in time, nothing to do yet", attention.open_now, none) }}{% endif %}
   {% if attention.near %}
     {# One strike or less before a penalty week. #}
@@ -127,6 +160,14 @@
     <button class="secondary">Run daily job now</button>
     <span class="muted">Runs by itself every day at {{ assign_time }}.</span>
   </form>
+  {% if telegram_on %}
+  <form method="post" action="/admin/telegram/test" class="actions">
+    <button class="secondary">Send test message</button>
+    <span class="muted">Telegram: on. The bot posts the day's duties in the floor's group at {{ assign_time }}.</span>
+  </form>
+  {% else %}
+  <p class="muted">Telegram: off. To post the day's duties in the floor's group, set up the bot (<code>docs/deployment.md</code>).</p>
+  {% endif %}
 </section>
 
 {% macro strike_rows(rows) %}
@@ -204,19 +245,15 @@
 <section class="card" id="dishwasher" hx-swap="innerHTML show:#dishwasher:top">
   <h2>Dishwasher <span class="muted">{{ today|month_name }}</span></h2>
   {% if dishwasher_clears %}
+  {# Every entry of the month, also disputed ones, with what the floor speaker decided. #}
   <div class="table-wrap"><table class="compact">
-    <tr><th>Date</th><th>Resident</th><th class="end"><span class="sr-only">Actions</span></th></tr>
+    <tr><th>Date</th><th>Resident</th><th>Status</th><th class="end"><span class="sr-only">Actions</span></th></tr>
     {% for c in dishwasher_clears %}
-      <tr>
-        {# Only this month's entries (the heading names it), so no year. #}
-        <td><span class="nowrap">{{ c.cleared_at|local_date|short_date }}</span> {{ c.cleared_at|clock }}</td>
+      <tr{% if c.disputed_at %} class="muted"{% endif %}>
+        <td>{{ clear_when(c) }}</td>
         <td>{{ person(c.user) }}</td>
-        <td class="end">
-          <form method="post" action="/admin/dishwasher/{{ c.id }}/delete" class="inline"
-                hx-confirm="Delete {{ c.user.first_name ~ "'s" if c.user else "this" }} entry from {{ c.cleared_at|date_time }}? It won't count toward the heroes.">
-            <button class="secondary">Delete</button>
-          </form>
-        </td>
+        <td>{{ clear_status(c) }}</td>
+        <td class="end">{{ clear_actions(c) }}</td>
       </tr>
     {% endfor %}
   </table></div>

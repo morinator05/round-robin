@@ -4,10 +4,12 @@ import html
 import re
 from datetime import timedelta
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from starlette.routing import Route
 
-from app.config import settings
+from app.config import Settings, settings
 from app.formatting import long_date, short_date
 from app.main import app
 from app.models import AwayPeriod, DishwasherClear, Duty, PotentialDriver, Status, User
@@ -185,7 +187,7 @@ async def test_dashboard_before_the_deadline_hour(session, browser, clock):
     assert await duties.get_trip(session, Duty.kitchen, TUESDAY) is None
 
 
-async def test_dishwasher_pages(session, browser, clock, monkeypatch):
+async def test_dishwasher_pages(session, browser, clock):
     people = await make_users(session, n=4)
     # p3 is a hero from last month, shown this month.
     last_month = dishwasher.previous_month(clock.today).replace(day=15)
@@ -195,37 +197,38 @@ async def test_dishwasher_pages(session, browser, clock, monkeypatch):
     p2 = await browser("p2")
     home = await p2.get("/")
     assert 'hx-post="/dishwasher?card=1"' in home.text
+    # No cooldown, so a double click mustn't send it twice.
+    assert 'hx-disabled-elt="this"' in home.text
     assert "has no kitchen duty in" in words(home) and "dishwasher hero" in words(home)
     # Says what it's for to someone who hasn't emptied it yet.
     assert "Optional: the 2 who empty it most get next month off kitchen duty" in words(home)
     # The card swaps itself, like "Done".
     r = await p2.post("/dishwasher?card=1", headers=CARD)
     assert r.status_code == 303 and r.headers["location"] == "/"
+    # No cooldown: the button stays, and marking again counts again.
     home = await p2.get("/")
-    # While it can't be marked: a plain label saying when it can, no (disabled) button.
-    assert "Again from" in words(home) and "disabled" not in home.text
-    assert 'hx-post="/dishwasher?card=1"' not in home.text
+    assert 'hx-post="/dishwasher?card=1"' in home.text and "Again from" not in words(home)
+    r = await p2.post("/dishwasher?card=1", headers=CARD)
+    assert r.status_code == 303 and "hx-refresh" not in r.headers
+    home = await p2.get("/")
     # A mis-tap can be taken back for a few minutes, by whoever marked it.
     clear_id = await session.scalar(
-        select(DishwasherClear.id).where(DishwasherClear.user_id == people[1].id)
+        select(func.max(DishwasherClear.id)).where(DishwasherClear.user_id == people[1].id)
     )
     undo = f'hx-post="/dishwasher/{clear_id}/undo?card=1"'
     assert undo in home.text
-    assert "You emptied it once this month" in words(home) and "Optional:" not in words(home)
+    assert "You emptied it 2 times this month" in words(home) and "Optional:" not in words(home)
     assert "Last emptied by you today" in words(home)
-    # Too soon: the page reloads to show why.
-    r = await p2.post("/dishwasher?card=1", headers=CARD)
-    assert r.headers.get("hx-refresh") == "true"
-    assert "already emptied by you" in words(await p2.get("/"))
     stats = words(await p2.get("/stats"))
     assert stats.count(f"on track for {dishwasher.next_month(clock.today):%B}") == 1
-    assert "You emptied it once this month" in words(await p2.get("/me"))
+    assert "You emptied it 2 times this month" in words(await p2.get("/me"))
 
     # The hero is addressed directly; someone else emptied it just now.
     p3 = await browser("p3")
     home = await p3.get("/")
-    assert "You have no kitchen duty in" in words(home) and "Again from" in words(home)
-    assert undo not in home.text
+    assert "You have no kitchen duty in" in words(home)
+    assert f"Last emptied by {people[1].first_name} {people[1].room_number}" in words(home)
+    assert undo not in home.text and 'hx-post="/dishwasher?card=1"' in home.text
     r = await p3.post(f"/dishwasher/{clear_id}/undo?card=1", headers=CARD)
     assert r.headers.get("hx-refresh") == "true"
     assert "You have no kitchen duty in" in words(await p3.get("/me"))
@@ -237,10 +240,65 @@ async def test_dishwasher_pages(session, browser, clock, monkeypatch):
     admin = await browser("p1")
     assert f"/admin/dishwasher/{clear_id}/delete" in (await admin.get("/admin")).text
     assert (await admin.post(f"/admin/dishwasher/{clear_id}/delete")).status_code == 303
-    assert await session.scalar(select(func.count(DishwasherClear.id))) == 1
+    assert await session.scalar(select(func.count(DishwasherClear.id))) == 2
     # Without htmx the whole page comes back with a message.
-    monkeypatch.setattr(settings, "dishwasher_cooldown_minutes", 0)
     assert "Marked as emptied" in await follow(admin, await admin.post("/dishwasher"))
+
+    # A third entry within 90 minutes (all at noon): a burst for the floor speaker to check.
+    # Only the floor speaker sees it, in "Needs attention" and the list of entries.
+    assert "suspicious" not in words(section(await admin.get("/admin"), "dishwasher"))
+    await p3.post("/dishwasher?card=1", headers=CARD)
+    assert "You emptied it once this month" in words(await p3.get("/me"))
+    burst = list(
+        await session.scalars(
+            select(DishwasherClear.id)
+            .where(DishwasherClear.cleared_at >= clock.now)
+            .order_by(DishwasherClear.id)
+        )
+    )
+    assert len(burst) == 3
+    page = await admin.get("/admin")
+    attention = section(page, "attention")
+    assert "Dishwasher" in words(attention) and "3 or more entries within 90 minutes" in words(
+        attention
+    )
+    for clear in burst:
+        for action in ("dispute", "valid"):
+            assert f"/admin/dishwasher/{clear}/{action}" in attention
+    assert words(section(page, "dishwasher")).count("suspicious") == 3
+
+    def log_row(page, clear_id: int) -> str:
+        """The row of entry `clear_id` in the floor speaker's list of entries."""
+        found = [r for r in rows(section(page, "dishwasher")) if f"/{clear_id}/" in r]
+        assert len(found) == 1
+        return found[0]
+
+    # Disputed: it stays in the list (who and when) but no longer counts, and the burst is over.
+    p3_clear = burst[-1]
+    speaker = f"{people[0].first_name} {people[0].room_number}"
+    r = await admin.post(f"/admin/dishwasher/{p3_clear}/dispute")
+    assert r.headers["location"] == "/admin"
+    page = await admin.get("/admin")
+    assert "Dishwasher entry disputed" in words(page)
+    row = log_row(page, p3_clear)
+    assert f"disputed by {speaker}" in words(row) and f"/{p3_clear}/valid" in row
+    assert "/admin/dishwasher/" not in section(page, "attention")
+    assert "suspicious" not in words(section(page, "dishwasher"))
+    assert "You haven't emptied it this month" in words(await p3.get("/me"))
+    # Valid after all: it counts again and is checked; the other two still need a decision.
+    page = await follow(admin, await admin.post(f"/admin/dishwasher/{p3_clear}/valid"))
+    assert "Dishwasher entry marked valid" in page
+    assert "You emptied it once this month" in words(await p3.get("/me"))
+    page = await admin.get("/admin")
+    attention = section(page, "attention")
+    assert f"/admin/dishwasher/{p3_clear}/" not in attention
+    assert all(f"/admin/dishwasher/{c}/valid" in attention for c in burst[:-1])
+    # One status per entry: checked, or still suspicious. It can be disputed after all.
+    row = log_row(page, p3_clear)
+    assert f"valid, checked by {speaker}" in words(row) and f"/{p3_clear}/dispute" in row
+    assert "suspicious" not in words(row)
+    assert words(section(page, "dishwasher")).count("suspicious") == 2
+    assert "You emptied it once this month" in words(await p2.get("/me"))
 
 
 # --- other pages ----------------------------------------------------------------
@@ -318,7 +376,11 @@ async def test_help_page(session, browser, monkeypatch):
     # The pair rule spelled out, and who the floor speaker is.
     assert "Agree who cleans" in page and "you both get a strike" in page
     assert "Your floor speaker: Person" in page
-    assert "For the floor speaker" in words(await (await browser("p1")).get("/help"))
+    # The dishwasher has no cooldown; the floor speaker checks bursts and decides.
+    assert "nobody can mark it again" not in page
+    assert "3 or more entries within 90 minutes" in page
+    floor = words(await (await browser("p1")).get("/help"))
+    assert "For the floor speaker" in floor and "or mark it Valid" in floor
     monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
     assert "all of you get a strike" in words(await resident.get("/help"))
 
@@ -336,6 +398,10 @@ async def test_admin_needs_attention_and_keep_missed(session, browser, clock, mo
     assert "Version development" in page
     monkeypatch.setattr(settings, "app_version", "v1.3.0")
     assert "Version v1.3.0" in words(await admin.get("/admin"))
+    # Telegram is off until it's set up (docs/deployment.md).
+    assert "Telegram: off" in page and "Send test message" not in page
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram isn't set up" in page
 
     # Yesterday's kitchen duty nobody marked (missed by now), and today's (still open).
     late = await kitchen_pair(session, people, clock.today - timedelta(days=1))
@@ -451,9 +517,33 @@ async def test_admin_absences(session, browser, clock):
     assert away_id not in set(await session.scalars(select(AwayPeriod.id)))
 
 
-async def test_admin_strike_and_duty_lists(session, browser, clock):
+async def test_admin_strike_and_duty_lists(session, browser, clock, bot):
     people = await make_users(session, n=4)
     admin = await browser("p1")
+    # With Telegram set up, a test message shows whether the bot can post in the group.
+    assert "Telegram: on" in words(await admin.get("/admin"))
+    assert "Test message sent" in await follow(admin, await admin.post("/admin/telegram/test"))
+    [test] = bot.texts
+    assert test.startswith("Test message from Round Robin") and "the bot can post here" in test
+    bot.error = "Bad Request: chat not found"
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram refused the message: Bad Request: chat not found" in page
+    bot.error, bot.down = None, True
+    page2 = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram can't be reached" in page2 and len(bot.texts) == 1
+    # The bot token is a password: no error message shows it.
+    assert bot.token not in page and bot.token not in page2
+    bot.down, bot.answer = False, {"ok": True}
+    page = await follow(admin, await admin.post("/admin/telegram/test"))
+    assert "Telegram sent an answer that makes no sense" in page
+    bot.answer = None
+    # A token that can't be one (e.g. a tab pasted along) stops the start, with a message
+    # that doesn't show it.
+    with pytest.raises(ValidationError) as error:
+        Settings(telegram_bot_token="123456:abc\tdef")
+    assert "TELEGRAM_BOT_TOKEN" in str(error.value) and "abc" not in str(error.value)
+    assert Settings(telegram_bot_token=" 123456:AB-c_d\n").telegram_bot_token == "123456:AB-c_d"
+    assert Settings(telegram_chat_id=" -1001 ").telegram_chat_id == "-1001"
     # Empty lists are a plain sentence, not a table with only a header.
     page = await admin.get("/admin")
     for part, sentence in [

@@ -73,14 +73,18 @@ strikes it creates a trash `Trip` with `is_penalty=True` in the next free week a
 those strikes as redeemed by it (`Strike.redeemed_by_trip_id`). Penalty trips don't count
 for fairness.
 
-**Dishwasher heroes.** `app/services/dishwasher.py`: residents mark `DishwasherClear`s (one
-per `DISHWASHER_COOLDOWN_MINUTES` for everyone, under an advisory lock). Heroes are computed,
-never stored: `dishwasher.heroes(today)` is the top `DISHWASHER_HEROES` of the previous
+**Dishwasher heroes.** `app/services/dishwasher.py`: residents mark `DishwasherClear`s, any
+time, with no cooldown. Bursts are computed, never stored: `dishwasher.suspicious(clears)` is
+every entry in a run of `DISHWASHER_SUSPICIOUS_COUNT` or more (by anyone) less than
+`DISHWASHER_SUSPICIOUS_MINUTES` apart; `needs_review` (the admin's "Needs attention") the
+ones not `confirmed_at`. The floor speaker disputes an entry (`dispute_clear`: `disputed_at`,
+it stays in the list but counts nowhere, not in `standings`, `last_clear` or a burst) or
+confirms it (`confirm_clear`); one clears the other. Heroes are computed, never stored: `dishwasher.heroes(today)` is the top `DISHWASHER_HEROES` of the previous
 calendar month (ties: earlier last emptying). `duties.load_members(session, duty, today)` adds
 today's month as an away period of each hero for kitchen only, so they neither ride nor are
 chosen and owe no share; `reconcile` therefore loads members per duty, and `preview` takes
 `today` (next month's heroes aren't known yet). Only the current month's entries can be
-deleted, so a hero month never changes once it runs.
+deleted, disputed or confirmed, so a hero month never changes once it runs.
 
 **Moved-out users.** Deleting a user sets `user_id` to NULL on their riders/potential
 drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they
@@ -92,18 +96,32 @@ today's trips, and commits. A day's (on Monday the week's) trip is only material
 `duties.choose_at` on: the deadline hour of its first day, right after the previous trip's
 deadline, so only one trip is ever open (the preview's per-driver plans rely on that).
 Until then `duties.current_trip` (the dashboard card) is the previous trip. It runs on
-startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and from
-the dashboard when the current trips are missing (`jobs.current_trips`), so it must stay
-idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
+startup, at `DEADLINE_HOUR`:05 (scheduler in `app/main.py`), from the admin page, and when
+the current trips are missing (`jobs.current_trips`): from the dashboard, and from
+`jobs.catch_up` every 15 minutes after the deadline hour until midnight (if the 8:05 run
+failed). So it must stay idempotent. Absences, pausing and deleting users call `duties.reconcile(session, now)` on
 every trip still open (yesterday's too, until its deadline): whoever no longer rides stops
 being a rider of undriven trips; paused and deleted pending potential drivers are replaced,
 but on a trip whose days are over only removed (nobody new gets a past duty, and
 `fill_current` never tops one up). Away pending potential drivers keep their duty. Deleting
 an absence or resuming someone makes them a rider again (`duties.add_riders`).
 
+**Telegram.** `app/services/telegram.py` only sends (Bot API `sendMessage` via httpx; tests
+replace its module-level `transport`). `announce_morning` posts today's duties once a day
+after the daily job, from `jobs.scheduled_tick` (8:05), `jobs.catch_up` (every 15 minutes
+until midnight) and, in the background, on startup; never from page requests. It names only
+pending potential drivers, or who drove it. `Announcement` rows (unique kind + day, with
+Telegram's `message_id`) make it idempotent under `Lock.telegram`: `morning` per day, and
+`trash` per week (its start date), so the week's trash duty comes with the week's first
+post that goes out. It is off unless
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set; conftest forces them empty and fails
+any real request, the `bot` fixture fakes Telegram. httpx's logger stays at WARNING: its
+INFO lines contain the token.
+
 **Layers.**
-- `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick`).
-  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, all in
+- `app/services/*`: all rules. Services `flush` but don't `commit` (except `daily_tick` and
+  `telegram.announce_morning`).
+  They raise a `ServiceError` (`DutyError`, `UserError`, `DishwasherError`, `TelegramError`, all in
   `services/errors.py`) with an English, user-facing message. Advisory locks:
   `db.advisory_lock(session, Lock.trips)`.
 - `app/web/`: the routes, one module per page (`login`, `dashboard`, `profile`, `pages`,
