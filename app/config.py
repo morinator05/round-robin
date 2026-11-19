@@ -32,8 +32,6 @@ class Settings(BaseSettings):
     undo_minutes: int = 10
     # How far ahead the dashboard preview looks.
     preview_days: int = 14
-    # Minutes after an emptying of the dishwasher before anyone can mark the next one.
-    dishwasher_cooldown_minutes: int = 90
     # How many of a month's top dishwasher emptiers get the next month off kitchen duty.
     dishwasher_heroes: int = 2
     # Send the login cookie only over HTTPS. Turn on when the app is behind TLS.

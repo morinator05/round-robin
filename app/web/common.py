@@ -65,7 +65,6 @@ templates.env.globals.update(
     # The deadline of a duty, and when the next one is chosen (by the daily job, 5 minutes on).
     deadline_time=f"{settings.deadline_hour:02d}:00",
     assign_time=f"{settings.deadline_hour:02d}:05",
-    dishwasher_cooldown=settings.dishwasher_cooldown_minutes,
     dishwasher_heroes=settings.dishwasher_heroes,
     floor_name=settings.floor_name,
     min_password_length=auth.MIN_PASSWORD_LENGTH,

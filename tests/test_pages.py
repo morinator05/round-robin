@@ -185,7 +185,7 @@ async def test_dashboard_before_the_deadline_hour(session, browser, clock):
     assert await duties.get_trip(session, Duty.kitchen, TUESDAY) is None
 
 
-async def test_dishwasher_pages(session, browser, clock, monkeypatch):
+async def test_dishwasher_pages(session, browser, clock):
     people = await make_users(session, n=4)
     # p3 is a hero from last month, shown this month.
     last_month = dishwasher.previous_month(clock.today).replace(day=15)
@@ -195,37 +195,38 @@ async def test_dishwasher_pages(session, browser, clock, monkeypatch):
     p2 = await browser("p2")
     home = await p2.get("/")
     assert 'hx-post="/dishwasher?card=1"' in home.text
+    # No cooldown, so a double click mustn't send it twice.
+    assert 'hx-disabled-elt="this"' in home.text
     assert "has no kitchen duty in" in words(home) and "dishwasher hero" in words(home)
     # Says what it's for to someone who hasn't emptied it yet.
     assert "Optional: the 2 who empty it most get next month off kitchen duty" in words(home)
     # The card swaps itself, like "Done".
     r = await p2.post("/dishwasher?card=1", headers=CARD)
     assert r.status_code == 303 and r.headers["location"] == "/"
+    # No cooldown: the button stays, and marking again counts again.
     home = await p2.get("/")
-    # While it can't be marked: a plain label saying when it can, no (disabled) button.
-    assert "Again from" in words(home) and "disabled" not in home.text
-    assert 'hx-post="/dishwasher?card=1"' not in home.text
+    assert 'hx-post="/dishwasher?card=1"' in home.text and "Again from" not in words(home)
+    r = await p2.post("/dishwasher?card=1", headers=CARD)
+    assert r.status_code == 303 and "hx-refresh" not in r.headers
+    home = await p2.get("/")
     # A mis-tap can be taken back for a few minutes, by whoever marked it.
     clear_id = await session.scalar(
-        select(DishwasherClear.id).where(DishwasherClear.user_id == people[1].id)
+        select(func.max(DishwasherClear.id)).where(DishwasherClear.user_id == people[1].id)
     )
     undo = f'hx-post="/dishwasher/{clear_id}/undo?card=1"'
     assert undo in home.text
-    assert "You emptied it once this month" in words(home) and "Optional:" not in words(home)
+    assert "You emptied it 2 times this month" in words(home) and "Optional:" not in words(home)
     assert "Last emptied by you today" in words(home)
-    # Too soon: the page reloads to show why.
-    r = await p2.post("/dishwasher?card=1", headers=CARD)
-    assert r.headers.get("hx-refresh") == "true"
-    assert "already emptied by you" in words(await p2.get("/"))
     stats = words(await p2.get("/stats"))
     assert stats.count(f"on track for {dishwasher.next_month(clock.today):%B}") == 1
-    assert "You emptied it once this month" in words(await p2.get("/me"))
+    assert "You emptied it 2 times this month" in words(await p2.get("/me"))
 
     # The hero is addressed directly; someone else emptied it just now.
     p3 = await browser("p3")
     home = await p3.get("/")
-    assert "You have no kitchen duty in" in words(home) and "Again from" in words(home)
-    assert undo not in home.text
+    assert "You have no kitchen duty in" in words(home)
+    assert f"Last emptied by {people[1].first_name} {people[1].room_number}" in words(home)
+    assert undo not in home.text and 'hx-post="/dishwasher?card=1"' in home.text
     r = await p3.post(f"/dishwasher/{clear_id}/undo?card=1", headers=CARD)
     assert r.headers.get("hx-refresh") == "true"
     assert "You have no kitchen duty in" in words(await p3.get("/me"))
@@ -237,9 +238,8 @@ async def test_dishwasher_pages(session, browser, clock, monkeypatch):
     admin = await browser("p1")
     assert f"/admin/dishwasher/{clear_id}/delete" in (await admin.get("/admin")).text
     assert (await admin.post(f"/admin/dishwasher/{clear_id}/delete")).status_code == 303
-    assert await session.scalar(select(func.count(DishwasherClear.id))) == 1
+    assert await session.scalar(select(func.count(DishwasherClear.id))) == 2
     # Without htmx the whole page comes back with a message.
-    monkeypatch.setattr(settings, "dishwasher_cooldown_minutes", 0)
     assert "Marked as emptied" in await follow(admin, await admin.post("/dishwasher"))
 
 
@@ -318,6 +318,8 @@ async def test_help_page(session, browser, monkeypatch):
     # The pair rule spelled out, and who the floor speaker is.
     assert "Agree who cleans" in page and "you both get a strike" in page
     assert "Your floor speaker: Person" in page
+    # The dishwasher has no cooldown.
+    assert "nobody can mark it again" not in page
     assert "For the floor speaker" in words(await (await browser("p1")).get("/help"))
     monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
     assert "all of you get a strike" in words(await resident.get("/help"))

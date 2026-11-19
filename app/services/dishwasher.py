@@ -1,5 +1,5 @@
-"""The dishwasher list: whoever empties the dishwasher marks it; the month's top ones become
-dishwasher heroes and get the next month off kitchen duty.
+"""The dishwasher list: whoever empties the dishwasher marks it, as often as they do; the
+month's top ones become dishwasher heroes and get the next month off kitchen duty.
 
 The heroes are never stored but worked out from the previous month's emptyings. Past months
 can't be changed (`delete_clear`), so a month's heroes stay the same while it runs.
@@ -13,8 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.db import Lock, advisory_lock
-from app.formatting import clock
 from app.models import DishwasherClear, User
 from app.services.errors import DishwasherError
 
@@ -48,11 +46,6 @@ def month_window(day: date) -> tuple[datetime, datetime]:
     )
 
 
-def cooldown() -> timedelta:
-    """Time after an emptying before the next one can be marked."""
-    return timedelta(minutes=settings.dishwasher_cooldown_minutes)
-
-
 async def last_clear(session: AsyncSession) -> DishwasherClear | None:
     """The latest emptying, with who did it."""
     return await session.scalar(
@@ -63,36 +56,14 @@ async def last_clear(session: AsyncSession) -> DishwasherClear | None:
     )
 
 
-def next_allowed(last: DishwasherClear | None) -> datetime | None:
-    """From when the next emptying can be marked; None if any time."""
-    return last.cleared_at + cooldown() if last else None
-
-
 async def mark_cleared(session: AsyncSession, user: User, now: datetime) -> DishwasherClear:
-    """`user` emptied the dishwasher at `now`.
-
-    Only one emptying per cooldown counts, whoever marks it: after one, nobody can mark the
-    next for a while (`cooldown`).
+    """`user` emptied the dishwasher at `now`. Any time, as often as they like.
 
     Raises:
-        DishwasherError: if `user` is paused or the last emptying is too recent.
+        DishwasherError: if `user` is paused.
     """
     if not user.active:
         raise DishwasherError("Inactive residents can't mark the dishwasher")
-    await advisory_lock(session, Lock.dishwasher)
-    last = await last_clear(session)
-    allowed = next_allowed(last)
-    if allowed is not None and now < allowed:
-        if last.user_id == user.id:
-            who = "you"
-        elif last.user is not None:
-            who = last.user.display_name
-        else:
-            who = "a former resident"
-        raise DishwasherError(
-            f"The dishwasher was already emptied by {who} at {clock(last.cleared_at)}; "
-            f"the next one can be marked from {clock(allowed)}"
-        )
     clear = DishwasherClear(user_id=user.id, cleared_at=now)
     session.add(clear)
     await session.flush()
@@ -210,7 +181,7 @@ def can_undo_clear(clear: DishwasherClear, user: User, now: datetime) -> bool:
 async def undo_clear(
     session: AsyncSession, clear: DishwasherClear, user: User, now: datetime
 ) -> None:
-    """Take back a mis-tapped emptying: it no longer counts, and the next can be marked now.
+    """Take back a mis-tapped emptying: it no longer counts.
 
     Raises:
         DishwasherError: if `user` may not (any more), see `can_undo_clear`.

@@ -8,7 +8,16 @@ from app.config import settings
 from app.models import Duty
 from app.services import carpool, dishwasher, duties, jobs, users
 from app.services.dishwasher import DishwasherError
-from tests.helpers import MONDAY, NOVEMBER, OCTOBER, at, make_users, planned, plans, reload_trip
+from tests.helpers import (
+    MONDAY,
+    NOVEMBER,
+    OCTOBER,
+    at,
+    make_users,
+    planned,
+    plans,
+    reload_trip,
+)
 
 
 async def empty_in_turn(session, people, day: date) -> None:
@@ -29,21 +38,14 @@ async def test_dishwasher_marking(session):
     old = await dishwasher.mark_cleared(session, a, at(OCTOBER))
     start = at(MONDAY, 10)
     first = await dishwasher.mark_cleared(session, a, start)
-
-    # One cooldown for everyone, so an emptying isn't marked twice.
-    almost = start + timedelta(minutes=settings.dishwasher_cooldown_minutes - 1)
-    with pytest.raises(DishwasherError, match="emptied by Person .* from 11:30"):
-        await dishwasher.mark_cleared(session, b, almost)
-    with pytest.raises(DishwasherError, match="emptied by you"):
-        await dishwasher.mark_cleared(session, a, almost)
-    marked = start + dishwasher.cooldown()
+    # No cooldown: the next one can be marked right away, by anyone.
+    marked = start + timedelta(minutes=1)
     second = await dishwasher.mark_cleared(session, b, marked)
     await session.commit()
     # One each; on the tie whoever got there first is ahead.
     assert await standings(session, MONDAY) == [(a.id, 1), (b.id, 1)]
 
-    # A mis-tap can be taken back by whoever marked it, for a few minutes. Then the next
-    # emptying can be marked right away.
+    # A mis-tap can be taken back by whoever marked it, for a few minutes.
     soon = marked + timedelta(minutes=settings.undo_minutes - 1)
     late = marked + timedelta(minutes=settings.undo_minutes + 1)
     assert not dishwasher.can_undo_clear(second, a, soon)
@@ -51,7 +53,10 @@ async def test_dishwasher_marking(session):
     with pytest.raises(DishwasherError):
         await dishwasher.undo_clear(session, second, a, soon)
     await dishwasher.undo_clear(session, second, b, soon)
+    # The same person twice in a row counts twice.
     await dishwasher.mark_cleared(session, a, soon)
+    await session.commit()
+    assert await standings(session, MONDAY) == [(a.id, 2)]
 
     # The floor speaker can delete entries, only this month's.
     with pytest.raises(DishwasherError, match="Only the floor speaker"):

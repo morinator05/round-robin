@@ -187,26 +187,15 @@ async def dishwasher_ctx(
     """Template variables for `partials/dishwasher_card.html` and the hero line above the
     kitchen preview.
 
-    `state` is what the user's row shows: "can_mark" (the button), "done" (they emptied it
-    last and the next one doesn't count yet), "not_needed" (someone else did) or "inactive".
+    `state` is what the user's row shows: "can_mark" (the button, any time) or "inactive".
     """
     last = await dishwasher.last_clear(session)
-    allowed = dishwasher.next_allowed(last)
-    waiting = allowed is not None and now < allowed
-    if not user.active:
-        state = "inactive"
-    elif not waiting:
-        state = "can_mark"
-    elif last.user_id == user.id:
-        state = "done"
-    else:
-        state = "not_needed"
+    state = "can_mark" if user.active else "inactive"
     summary = await dishwasher.summary_for(session, user, now.date())
     heroes = [people[uid] for uid in summary.heroes if uid in people]
     return {
         "month": now.date(),
         "last": last,
-        "next_allowed": allowed if waiting else None,
         "can_undo": last is not None and dishwasher.can_undo_clear(last, user, now),
         "state": state,
         "mine": summary.mine,
