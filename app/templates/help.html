@@ -78,7 +78,9 @@
     kitchen duty. It doesn't count against them, like being away. Trash duty stays as usual.
     On a tie, whoever reached that number first wins.</p>
   <p>The <a href="/stats#dishwasher">statistics</a> show this month's count. Only mark it when
-    you really emptied it: the floor speaker can delete wrong entries from the current month.</p>
+    you really emptied it: the floor speaker sees every entry and checks when there are
+    {{ dishwasher_suspicious_count }} or more entries within {{ dishwasher_suspicious_minutes }}
+    minutes. Entries they dispute don't count; they can do that for the current month.</p>
 </section>
 
 <section class="card help" id="points">
@@ -98,6 +100,12 @@
   <p><strong>Excuse</strong> and <strong>Dispute</strong>: see <a href="#status">Status</a>.</p>
   <p><strong>Keep missed</strong>: a missed duty stays missed and the strike stays; it no longer
     shows under "Needs attention". You can still mark it done or excuse it in the duties list.</p>
+  <p><strong>Dishwasher</strong>: {{ dishwasher_suspicious_count }} or more entries within
+    {{ dishwasher_suspicious_minutes }} minutes show under "Needs attention". Talk to the
+    residents, then <strong>Dispute</strong> an entry (it stays in the list but no longer counts
+    toward the heroes, no strike) or mark it <strong>Valid</strong>. Entries are valid until
+    you dispute them. Only the current month can be changed: earlier months decided the
+    heroes.</p>
   <p><strong>Daily job</strong>: runs automatically at {{ assign_time }}, marks missed
     duties and assigns the next ones.</p>
 </section>

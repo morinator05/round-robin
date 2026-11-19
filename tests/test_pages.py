@@ -242,6 +242,62 @@ async def test_dishwasher_pages(session, browser, clock):
     # Without htmx the whole page comes back with a message.
     assert "Marked as emptied" in await follow(admin, await admin.post("/dishwasher"))
 
+    # A third entry within 90 minutes (all at noon): a burst for the floor speaker to check.
+    # Only the floor speaker sees it, in "Needs attention" and the list of entries.
+    assert "suspicious" not in words(section(await admin.get("/admin"), "dishwasher"))
+    await p3.post("/dishwasher?card=1", headers=CARD)
+    assert "You emptied it once this month" in words(await p3.get("/me"))
+    burst = list(
+        await session.scalars(
+            select(DishwasherClear.id)
+            .where(DishwasherClear.cleared_at >= clock.now)
+            .order_by(DishwasherClear.id)
+        )
+    )
+    assert len(burst) == 3
+    page = await admin.get("/admin")
+    attention = section(page, "attention")
+    assert "Dishwasher" in words(attention) and "3 or more entries within 90 minutes" in words(
+        attention
+    )
+    for clear in burst:
+        for action in ("dispute", "valid"):
+            assert f"/admin/dishwasher/{clear}/{action}" in attention
+    assert words(section(page, "dishwasher")).count("suspicious") == 3
+
+    def log_row(page, clear_id: int) -> str:
+        """The row of entry `clear_id` in the floor speaker's list of entries."""
+        found = [r for r in rows(section(page, "dishwasher")) if f"/{clear_id}/" in r]
+        assert len(found) == 1
+        return found[0]
+
+    # Disputed: it stays in the list (who and when) but no longer counts, and the burst is over.
+    p3_clear = burst[-1]
+    speaker = f"{people[0].first_name} {people[0].room_number}"
+    r = await admin.post(f"/admin/dishwasher/{p3_clear}/dispute")
+    assert r.headers["location"] == "/admin"
+    page = await admin.get("/admin")
+    assert "Dishwasher entry disputed" in words(page)
+    row = log_row(page, p3_clear)
+    assert f"disputed by {speaker}" in words(row) and f"/{p3_clear}/valid" in row
+    assert "/admin/dishwasher/" not in section(page, "attention")
+    assert "suspicious" not in words(section(page, "dishwasher"))
+    assert "You haven't emptied it this month" in words(await p3.get("/me"))
+    # Valid after all: it counts again and is checked; the other two still need a decision.
+    page = await follow(admin, await admin.post(f"/admin/dishwasher/{p3_clear}/valid"))
+    assert "Dishwasher entry marked valid" in page
+    assert "You emptied it once this month" in words(await p3.get("/me"))
+    page = await admin.get("/admin")
+    attention = section(page, "attention")
+    assert f"/admin/dishwasher/{p3_clear}/" not in attention
+    assert all(f"/admin/dishwasher/{c}/valid" in attention for c in burst[:-1])
+    # One status per entry: checked, or still suspicious. It can be disputed after all.
+    row = log_row(page, p3_clear)
+    assert f"valid, checked by {speaker}" in words(row) and f"/{p3_clear}/dispute" in row
+    assert "suspicious" not in words(row)
+    assert words(section(page, "dishwasher")).count("suspicious") == 2
+    assert "You emptied it once this month" in words(await p2.get("/me"))
+
 
 # --- other pages ----------------------------------------------------------------
 
@@ -318,9 +374,11 @@ async def test_help_page(session, browser, monkeypatch):
     # The pair rule spelled out, and who the floor speaker is.
     assert "Agree who cleans" in page and "you both get a strike" in page
     assert "Your floor speaker: Person" in page
-    # The dishwasher has no cooldown.
+    # The dishwasher has no cooldown; the floor speaker checks bursts and decides.
     assert "nobody can mark it again" not in page
-    assert "For the floor speaker" in words(await (await browser("p1")).get("/help"))
+    assert "3 or more entries within 90 minutes" in page
+    floor = words(await (await browser("p1")).get("/help"))
+    assert "For the floor speaker" in floor and "or mark it Valid" in floor
     monkeypatch.setattr(settings, "kitchen_people_per_day", 3)
     assert "all of you get a strike" in words(await resident.get("/help"))
 

@@ -2,9 +2,14 @@
 month's top ones become dishwasher heroes and get the next month off kitchen duty.
 
 The heroes are never stored but worked out from the previous month's emptyings. Past months
-can't be changed (`delete_clear`), so a month's heroes stay the same while it runs.
+can't be changed (`delete_clear`, `dispute_clear`), so a month's heroes stay the same while
+it runs.
+
+Entries are valid by default. Bursts (`suspicious`) are for the floor speaker to check: they
+dispute an entry (it no longer counts) or confirm it as valid.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
@@ -47,9 +52,10 @@ def month_window(day: date) -> tuple[datetime, datetime]:
 
 
 async def last_clear(session: AsyncSession) -> DishwasherClear | None:
-    """The latest emptying, with who did it."""
+    """The latest emptying that counts (not disputed), with who did it."""
     return await session.scalar(
         select(DishwasherClear)
+        .where(DishwasherClear.disputed_at.is_(None))
         .order_by(DishwasherClear.cleared_at.desc(), DishwasherClear.id.desc())
         .options(selectinload(DishwasherClear.user))
         .limit(1)
@@ -82,7 +88,7 @@ class Standing:
 
 async def standings(session: AsyncSession, day: date) -> list[Standing]:
     """Everyone with emptyings in `day`'s month, the most first; on a tie whoever got there
-    first. Moved-out residents' emptyings count for nobody."""
+    first. Disputed emptyings don't count, moved-out residents' count for nobody."""
     start, end = month_window(day)
     rows = await session.execute(
         select(
@@ -92,6 +98,7 @@ async def standings(session: AsyncSession, day: date) -> list[Standing]:
         )
         .where(
             DishwasherClear.user_id.is_not(None),
+            DishwasherClear.disputed_at.is_(None),
             DishwasherClear.cleared_at >= start,
             DishwasherClear.cleared_at < end,
         )
@@ -130,16 +137,61 @@ async def summary_for(session: AsyncSession, user: User, today: date) -> Summary
 
 
 async def clears_in_month(session: AsyncSession, day: date) -> list[DishwasherClear]:
-    """The emptyings of `day`'s month, newest first, with who did them."""
+    """The emptyings of `day`'s month, also disputed ones, newest first, with who did them
+    and who decided about them."""
     start, end = month_window(day)
     return list(
         await session.scalars(
             select(DishwasherClear)
             .where(DishwasherClear.cleared_at >= start, DishwasherClear.cleared_at < end)
             .order_by(DishwasherClear.cleared_at.desc(), DishwasherClear.id.desc())
-            .options(selectinload(DishwasherClear.user))
+            .options(
+                selectinload(DishwasherClear.user),
+                selectinload(DishwasherClear.disputed_by),
+                selectinload(DishwasherClear.confirmed_by),
+            )
         )
     )
+
+
+def suspicious(clears: Iterable[DishwasherClear]) -> set[int]:
+    """The ids of `clears` in a burst: `settings.dishwasher_suspicious_count` or more of
+    them less than `settings.dishwasher_suspicious_minutes` apart, first to last, whoever
+    made them. Disputed ones don't count, so they're never in one."""
+    n = max(settings.dishwasher_suspicious_count, 1)
+    window = timedelta(minutes=settings.dishwasher_suspicious_minutes)
+    counted = sorted(
+        (c for c in clears if c.disputed_at is None), key=lambda c: (c.cleared_at, c.id)
+    )
+    found = set()
+    for i in range(len(counted) - n + 1):
+        run = counted[i : i + n]
+        if run[-1].cleared_at - run[0].cleared_at < window:
+            found.update(c.id for c in run)
+    return found
+
+
+def needs_review(clears: list[DishwasherClear]) -> list[DishwasherClear]:
+    """The suspicious ones of `clears` that the floor speaker hasn't confirmed yet, in the
+    same order."""
+    found = suspicious(clears)
+    return [c for c in clears if c.id in found and c.confirmed_at is None]
+
+
+def _check_decision(clear: DishwasherClear, actor: User, now: datetime, do: str, done: str):
+    """The floor speaker decides about entries, only about this month's: earlier months are
+    final, so their heroes don't change while their month runs.
+
+    Raises:
+        DishwasherError: "Only the floor speaker can `do`" / "... can be `done`".
+    """
+    if not actor.is_admin:
+        raise DishwasherError(f"Only the floor speaker can {do}")
+    start, _ = month_window(now.date())
+    if clear.cleared_at < start:
+        raise DishwasherError(
+            f"Only this month's entries can be {done}: earlier months decided the heroes"
+        )
 
 
 async def delete_clear(
@@ -147,34 +199,65 @@ async def delete_clear(
 ) -> None:
     """Admin only: remove a wrongly marked emptying of the current month.
 
-    Earlier months are final, so their heroes don't change while their month runs.
-
     Raises:
         DishwasherError: if `actor` isn't the floor speaker or the entry is from an
             earlier month.
     """
-    if not actor.is_admin:
-        raise DishwasherError("Only the floor speaker can delete dishwasher entries")
-    start, _ = month_window(now.date())
-    if clear.cleared_at < start:
-        raise DishwasherError(
-            "Only this month's entries can be deleted: earlier months decided the heroes"
-        )
+    _check_decision(clear, actor, now, "delete dishwasher entries", "deleted")
     await session.delete(clear)
+    await session.flush()
+
+
+async def dispute_clear(
+    session: AsyncSession, clear: DishwasherClear, actor: User, now: datetime
+) -> None:
+    """Admin only: `clear` wasn't a real emptying. It stays in the list, with who disputed
+    it, but no longer counts: not toward the heroes, not toward a burst. No strike (the
+    floor speaker can give one). Also for one confirmed before.
+
+    Raises:
+        DishwasherError: if `actor` isn't the floor speaker, the entry is from an earlier
+            month or already disputed.
+    """
+    _check_decision(clear, actor, now, "dispute dishwasher entries", "disputed")
+    if clear.disputed_at is not None:
+        raise DishwasherError("This entry is already disputed")
+    clear.disputed_at, clear.disputed_by_id = now, actor.id
+    clear.confirmed_at = clear.confirmed_by_id = None
+    await session.flush()
+
+
+async def confirm_clear(
+    session: AsyncSession, clear: DishwasherClear, actor: User, now: datetime
+) -> None:
+    """Admin only: the floor speaker checked `clear` and it's valid. It no longer needs
+    their attention, and counts again if it was disputed.
+
+    Raises:
+        DishwasherError: if `actor` isn't the floor speaker, the entry is from an earlier
+            month or already confirmed.
+    """
+    _check_decision(clear, actor, now, "mark dishwasher entries valid", "marked valid")
+    if clear.confirmed_at is not None:
+        raise DishwasherError("This entry is already marked valid")
+    clear.confirmed_at, clear.confirmed_by_id = now, actor.id
+    clear.disputed_at = clear.disputed_by_id = None
     await session.flush()
 
 
 def can_undo_clear(clear: DishwasherClear, user: User, now: datetime) -> bool:
     """Whether `user` may take back `clear` now.
 
-    Only their own, within `settings.undo_minutes`, and not once a new month has begun
-    (the old one may have decided the heroes).
+    Only their own, within `settings.undo_minutes`, not once the floor speaker decided
+    about it, and not once a new month has begun (the old one may have decided the heroes).
     """
     start, _ = month_window(now.date())
     return (
         clear.user_id == user.id
         and now - clear.cleared_at <= timedelta(minutes=settings.undo_minutes)
         and clear.cleared_at >= start
+        and clear.disputed_at is None
+        and clear.confirmed_at is None
     )
 
 

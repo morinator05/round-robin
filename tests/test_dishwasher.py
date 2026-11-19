@@ -6,12 +6,13 @@ import pytest
 
 from app.config import settings
 from app.models import Duty
-from app.services import carpool, dishwasher, duties, jobs, users
+from app.services import carpool, dishwasher, duties, jobs, strikes, users
 from app.services.dishwasher import DishwasherError
 from tests.helpers import (
     MONDAY,
     NOVEMBER,
     OCTOBER,
+    TUESDAY,
     at,
     make_users,
     planned,
@@ -67,6 +68,74 @@ async def test_dishwasher_marking(session):
     await session.commit()
     assert await standings(session, MONDAY) == [(a.id, 1)]
 
+    # Bursts are for the floor speaker to check: 3 entries less than 90 minutes apart, first
+    # to last, whoever made them. Exactly 90 minutes isn't one.
+    evening = at(TUESDAY, 18)
+    window = timedelta(minutes=settings.dishwasher_suspicious_minutes)
+    in_turn = [
+        await dishwasher.mark_cleared(session, p, evening + window * k / 2)
+        for k, p in enumerate([a, b, a])
+    ]
+    await session.commit()
+    assert dishwasher.suspicious(await dishwasher.clears_in_month(session, TUESDAY)) == set()
+    # 5 minutes after the last: a burst with the two before it, but not with the first.
+    extra = await dishwasher.mark_cleared(session, b, evening + window + timedelta(minutes=5))
+    await session.commit()
+    burst = {in_turn[1].id, in_turn[2].id, extra.id}
+    clears = await dishwasher.clears_in_month(session, TUESDAY)
+    assert dishwasher.suspicious(clears) == burst
+    assert {c.id for c in dishwasher.needs_review(clears)} == burst
+    # Valid by default: they count until the floor speaker disputes one.
+    assert await standings(session, TUESDAY) == [(a.id, 3), (b.id, 2)]
+
+    # Disputing: the floor speaker only, this month only, not twice. The entry stays in the
+    # list but no longer counts, also not toward a burst, and gives no strike.
+    decided = at(TUESDAY, 21)
+    with pytest.raises(DishwasherError, match="Only the floor speaker"):
+        await dishwasher.dispute_clear(session, extra, b, decided)
+    with pytest.raises(DishwasherError, match="this month"):
+        await dishwasher.dispute_clear(session, old, admin, decided)
+    await dishwasher.dispute_clear(session, extra, admin, decided)
+    with pytest.raises(DishwasherError, match="already disputed"):
+        await dishwasher.dispute_clear(session, extra, admin, decided)
+    await session.commit()
+    assert await standings(session, TUESDAY) == [(a.id, 3), (b.id, 1)]
+    clears = await dishwasher.clears_in_month(session, TUESDAY)
+    assert extra.id in {c.id for c in clears}
+    assert dishwasher.suspicious(clears) == set() and dishwasher.needs_review(clears) == []
+    assert await strikes.active_strikes(session, b.id) == []
+    # Nor is it the last emptying, and it can't be taken back any more.
+    assert (await dishwasher.last_clear(session)).id == in_turn[2].id
+    assert not dishwasher.can_undo_clear(extra, b, extra.cleared_at + timedelta(minutes=1))
+
+    # Valid: it counts again, and as checked it no longer needs a decision; the rest of the
+    # burst still does.
+    with pytest.raises(DishwasherError, match="Only the floor speaker"):
+        await dishwasher.confirm_clear(session, extra, b, decided)
+    with pytest.raises(DishwasherError, match="this month"):
+        await dishwasher.confirm_clear(session, old, admin, decided)
+    await dishwasher.confirm_clear(session, extra, admin, decided)
+    with pytest.raises(DishwasherError, match="already marked valid"):
+        await dishwasher.confirm_clear(session, extra, admin, decided)
+    await session.commit()
+    assert await standings(session, TUESDAY) == [(a.id, 3), (b.id, 2)]
+    clears = await dishwasher.clears_in_month(session, TUESDAY)
+    assert dishwasher.suspicious(clears) == burst
+    assert {c.id for c in dishwasher.needs_review(clears)} == burst - {extra.id}
+    for c in in_turn[1:]:
+        await dishwasher.confirm_clear(session, c, admin, decided)
+    checked = in_turn[2]
+    assert not dishwasher.can_undo_clear(checked, a, checked.cleared_at + timedelta(minutes=1))
+    # One more in the checked burst: only that one needs a decision.
+    more = await dishwasher.mark_cleared(session, a, extra.cleared_at + timedelta(minutes=1))
+    await session.commit()
+    clears = await dishwasher.clears_in_month(session, TUESDAY)
+    assert [c.id for c in dishwasher.needs_review(clears)] == [more.id]
+    # A valid one can still be disputed after all.
+    changed_mind = decided + timedelta(minutes=1)
+    await dishwasher.dispute_clear(session, extra, admin, changed_mind)
+    assert extra.confirmed_at is None and extra.disputed_at == changed_mind
+
     # No undo into a new month: the old one may already have decided the heroes.
     end = at(date(2026, 11, 30), 23, 58)
     last = await dishwasher.mark_cleared(session, b, end)
@@ -75,6 +144,12 @@ async def test_dishwasher_marking(session):
     await users.set_active(session, paused, False, end)
     with pytest.raises(DishwasherError, match="Inactive"):
         await dishwasher.mark_cleared(session, paused, end + timedelta(days=1))
+
+    # The floor speaker who decided moves out: the decisions stay.
+    await users.delete(session, admin, end)
+    await session.commit()
+    await session.refresh(extra)
+    assert extra.disputed_at == changed_mind and extra.disputed_by_id is None
 
 
 async def test_dishwasher_heroes_are_the_top_of_last_month(session):

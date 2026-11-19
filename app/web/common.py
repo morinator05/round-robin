@@ -66,6 +66,8 @@ templates.env.globals.update(
     deadline_time=f"{settings.deadline_hour:02d}:00",
     assign_time=f"{settings.deadline_hour:02d}:05",
     dishwasher_heroes=settings.dishwasher_heroes,
+    dishwasher_suspicious_count=settings.dishwasher_suspicious_count,
+    dishwasher_suspicious_minutes=settings.dishwasher_suspicious_minutes,
     floor_name=settings.floor_name,
     min_password_length=auth.MIN_PASSWORD_LENGTH,
     # For the `pattern` of room inputs, which can't ignore case.
