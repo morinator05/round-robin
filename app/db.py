@@ -26,8 +26,6 @@ class Lock(enum.IntEnum):
     # Creating and reassigning trips: the daily job and admin actions can't both create
     # the same trip, or choose a penalty week someone else is choosing.
     trips = 4004
-    # Marking the dishwasher: two clicks at once, the second waits and sees the first.
-    dishwasher = 4005
 
 
 async def advisory_lock(session: AsyncSession, lock: Lock) -> None:
