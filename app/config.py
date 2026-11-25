@@ -1,5 +1,6 @@
 """App settings, read from environment variables or `.env` (names are case-insensitive)."""
 
+import re
 from datetime import date, datetime
 from functools import cached_property
 from zoneinfo import ZoneInfo
@@ -11,7 +12,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """All settings with their defaults."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # hide_input_in_errors: an invalid setting's error names it but doesn't show its value,
+    # so a mistyped secret (key, bot token) doesn't end up in the log.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     database_url: str = "postgresql+asyncpg://e1:e1@localhost:5432/e1"
     # Signs the login cookie: whoever knows it can log in as anyone. No usable default on purpose.
@@ -45,6 +48,16 @@ class Settings(BaseSettings):
     app_version: str = ""
     # Off in tests, so no background job touches the test database.
     run_scheduler: bool = True
+    # Optional Telegram bot that posts each morning's duties in the floor's group
+    # (`services/telegram`). Off unless token and chat are set. The token is the bot's
+    # password: whoever has it can post as the bot.
+    telegram_bot_token: str = ""
+    # The group: its id (-1001234567890), or @name for a public one.
+    telegram_chat_id: str = ""
+    # A topic of the group to post in (its message_thread_id); without one, the main chat.
+    telegram_thread_id: int | None = None
+    # The app's address, linked at the end of the bot's posts.
+    app_url: str = ""
     # Optional first floor speaker, created on startup while there are no users at all.
     admin_username: str = ""
     admin_password: str = ""
@@ -69,6 +82,35 @@ class Settings(BaseSettings):
         if not 0 <= value <= 23:
             raise ValueError("DEADLINE_HOUR must be between 0 and 23")
         return value
+
+    @field_validator("telegram_bot_token")
+    @classmethod
+    def bot_token_format(cls, value: str) -> str:
+        """Empty (off), or a token like 123456:ABC-def from @BotFather. Spaces and line
+        breaks around it (e.g. pasted along) are dropped."""
+        value = value.strip()
+        if value and not re.fullmatch(r"\d+:[A-Za-z0-9_-]+", value):
+            raise ValueError(
+                "TELEGRAM_BOT_TOKEN must be a bot token from @BotFather, like 123456:ABC-def"
+            )
+        return value
+
+    @field_validator("telegram_chat_id")
+    @classmethod
+    def strip_chat_id(cls, value: str) -> str:
+        """The chat id without spaces around it."""
+        return value.strip()
+
+    @field_validator("telegram_thread_id", mode="before")
+    @classmethod
+    def empty_thread_id_is_none(cls, value):
+        """`TELEGRAM_THREAD_ID=` (empty) means no topic, not an invalid number."""
+        return None if value == "" else value
+
+    @property
+    def telegram_enabled(self) -> bool:
+        """Whether the Telegram bot is set up."""
+        return bool(self.telegram_bot_token and self.telegram_chat_id)
 
     @cached_property
     def tz(self) -> ZoneInfo:

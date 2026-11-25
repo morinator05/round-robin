@@ -81,13 +81,16 @@ week.
   gets a strike). A missed duty can also just stay missed ("Keep missed": the strike stays
   and it leaves "Needs attention"; it can still be marked done or excused later).
 - Give and revoke strikes; enter absences for residents; dispute, mark valid or delete
-  dishwasher entries; run the daily job by hand.
+  dishwasher entries; run the daily job by hand; send a test message to the floor's
+  Telegram group.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `E103`: building, floor, room 01–99.
 
 **Daily job** (8:05): marks missed duties and gives the strikes, then assigns
-today's kitchen and this week's trash duty. Residents who are paused or move out are replaced
+today's kitchen and this week's trash duty. If the floor has the Telegram bot (set up on the
+server), it then posts who is on duty in the floor's group; if that fails, it tries again
+every 15 minutes that day. Residents who are paused or move out are replaced
 on their open duties immediately; on yesterday's duty, still open until 8:00, they are only
 taken off it. Being away doesn't take you off a duty you already have (see above).
 

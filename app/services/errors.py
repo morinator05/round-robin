@@ -15,3 +15,7 @@ class UserError(ServiceError):
 
 class DishwasherError(ServiceError):
     """An action on the dishwasher list isn't allowed."""
+
+
+class TelegramError(ServiceError):
+    """The bot couldn't post: Telegram is off, unreachable or refused the message."""

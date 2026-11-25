@@ -12,11 +12,10 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from app import db
 from app.config import settings
-from app.db import SessionLocal
 from app.deps import SESSION_MAX_SECONDS, LoginRequired
-from app.services import users
-from app.services.jobs import scheduled_tick
+from app.services import jobs, telegram, users
 from app.web import public, router
 
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +26,7 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Creates the first floor speaker if configured, then runs the daily job once on startup
     and on a schedule while the app is up."""
-    async with SessionLocal() as session:
+    async with db.SessionLocal() as session:
         # Invalid ADMIN_* settings stop the startup, like a missing SECRET_KEY does.
         admin = await users.create_initial_admin(session)
         if admin:
@@ -41,13 +40,24 @@ async def lifespan(app: FastAPI):
         trigger = CronTrigger(hour=settings.deadline_hour, minute=5, timezone=settings.tz)
         # If the job couldn't run on time (e.g. a suspended host), run it once as soon as
         # possible instead of skipping it.
-        scheduler.add_job(scheduled_tick, trigger, misfire_grace_time=None, coalesce=True)
+        scheduler.add_job(jobs.scheduled_tick, trigger, misfire_grace_time=None, coalesce=True)
+        # Every quarter of an hour after it, until midnight: runs the daily job if it
+        # failed, and posts on Telegram if that's still due. Otherwise it does nothing.
+        catch_up = CronTrigger(
+            hour=f"{settings.deadline_hour}-23", minute="5,20,35,50", timezone=settings.tz
+        )
+        scheduler.add_job(jobs.catch_up, catch_up, coalesce=True)
         scheduler.start()
         try:
-            await scheduled_tick()
+            async with db.SessionLocal() as session:
+                await jobs.daily_tick(session, settings.now())
         except Exception:
-            # Don't keep the app from starting; the dashboard runs it again when needed.
+            # Don't keep the app from starting; the catch-up job and the dashboard run it
+            # again when needed.
             log.exception("Daily job on startup failed")
+        # Telegram can be slow: post in the background, so the app answers right away.
+        # (No grace time: the job isn't skipped if the start keeps the loop busy a while.)
+        scheduler.add_job(telegram.scheduled_announce, misfire_grace_time=None)
     yield
     if scheduler:
         scheduler.shutdown()

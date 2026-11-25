@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.config import settings
 from app.deps import AdminUser, Session
 from app.models import AwayPeriod, DishwasherClear, PotentialDriver, Status, Strike, Trip, User
-from app.services import dishwasher, duties, jobs, strikes, users
+from app.services import dishwasher, duties, jobs, strikes, telegram, users
 from app.services.errors import UserError
 from app.web.common import (
     act,
@@ -115,6 +115,7 @@ async def admin(request: Request, session: Session, user: AdminUser):
         can_mark=lambda pd: duties.can_mark_as_driver(pd, user, now),
         can_undo=lambda pd: duties.can_undo(pd, user, now),
         version=settings.app_version or "development",
+        telegram_on=settings.telegram_enabled,
     )
 
 
@@ -381,3 +382,14 @@ async def admin_tick(request: Request, session: Session, user: AdminUser):
         return "Daily job done"
 
     return await act(request, session, tick, "/admin")
+
+
+@router.post("/admin/telegram/test")
+async def admin_telegram_test(request: Request, session: Session, user: AdminUser):
+    """Post a test message in the floor's Telegram group, to check the bot's settings."""
+
+    async def test():
+        await telegram.send_test()
+        return "Test message sent"
+
+    return await act(request, session, test, "/admin")
