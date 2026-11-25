@@ -73,14 +73,18 @@ strikes it creates a trash `Trip` with `is_penalty=True` in the next free week a
 those strikes as redeemed by it (`Strike.redeemed_by_trip_id`). Penalty trips don't count
 for fairness.
 
-**Dishwasher heroes.** `app/services/dishwasher.py`: residents mark `DishwasherClear`s (one
-per `DISHWASHER_COOLDOWN_MINUTES` for everyone, under an advisory lock). Heroes are computed,
-never stored: `dishwasher.heroes(today)` is the top `DISHWASHER_HEROES` of the previous
+**Dishwasher heroes.** `app/services/dishwasher.py`: residents mark `DishwasherClear`s, any
+time, with no cooldown. Bursts are computed, never stored: `dishwasher.suspicious(clears)` is
+every entry in a run of `DISHWASHER_SUSPICIOUS_COUNT` or more (by anyone) less than
+`DISHWASHER_SUSPICIOUS_MINUTES` apart; `needs_review` (the admin's "Needs attention") the
+ones not `confirmed_at`. The floor speaker disputes an entry (`dispute_clear`: `disputed_at`,
+it stays in the list but counts nowhere, not in `standings`, `last_clear` or a burst) or
+confirms it (`confirm_clear`); one clears the other. Heroes are computed, never stored: `dishwasher.heroes(today)` is the top `DISHWASHER_HEROES` of the previous
 calendar month (ties: earlier last emptying). `duties.load_members(session, duty, today)` adds
 today's month as an away period of each hero for kitchen only, so they neither ride nor are
 chosen and owe no share; `reconcile` therefore loads members per duty, and `preview` takes
 `today` (next month's heroes aren't known yet). Only the current month's entries can be
-deleted, so a hero month never changes once it runs.
+deleted, disputed or confirmed, so a hero month never changes once it runs.
 
 **Moved-out users.** Deleting a user sets `user_id` to NULL on their riders/potential
 drivers (`ondelete="SET NULL"`) so history stays. `charge_riders` takes `None` ids: they

@@ -55,15 +55,19 @@ rounded so that they still sum to 0.
   3 strikes.
 
 **Dishwasher**
-- Whoever empties the dishwasher clicks "I emptied it" on the overview.
-- One emptying counts for one person: after someone marks it, nobody can mark it again for
-  1:30h.
+- Whoever empties the dishwasher clicks "I emptied it" on the overview, every time, as often
+  as they like.
+- The floor speaker sees every entry. 3 or more entries within 1:30h (by anyone) are
+  suspicious and show under "Needs attention": after talking to the residents, the floor
+  speaker disputes an entry (it stays in the list but doesn't count, no strike) or marks it
+  valid. Entries are valid until disputed.
 - Counted per calendar month. The 2 residents with the most emptyings become **dishwasher
   heroes**: no kitchen duty for the whole next month. That month counts like being away (for
   kitchen only), so they don't have to catch up afterwards. Trash duty stays as usual.
 - A mis-tap can be taken back for 10 minutes by whoever marked it.
 - Ties: whoever reached the count first wins.
-- The floor speaker can delete wrong entries of the current month; earlier months are final.
+- The floor speaker can dispute or delete wrong entries of the current month; earlier months
+  are final.
 
 **Absences** ("Away", on "My profile"): not picked during that time. A duty you already
 have stays yours (the floor speaker can excuse it); a penalty week moves to your next free
@@ -76,8 +80,8 @@ week.
   credit) or dispute it ("Dispute", also on "History": the claimer loses the credit and
   gets a strike). A missed duty can also just stay missed ("Keep missed": the strike stays
   and it leaves "Needs attention"; it can still be marked done or excused later).
-- Give and revoke strikes; enter absences for residents; delete wrong dishwasher entries;
-  run the daily job by hand.
+- Give and revoke strikes; enter absences for residents; dispute, mark valid or delete
+  dishwasher entries; run the daily job by hand.
 - Move-out/in: delete the old resident and add the new one as a new account (don't rename).
   The history stays as "former resident"; nobody inherits the share.
 - Room numbers like `E103`: building, floor, room 01–99.

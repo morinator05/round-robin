@@ -55,7 +55,7 @@ All in `.env`; `.env.example` has them with comments.
 | `KITCHEN_PEOPLE_PER_DAY` | `2` | People per kitchen duty. |
 | `TRASH_PEOPLE_PER_WEEK` | `1` | People per trash duty. |
 | `STRIKE_THRESHOLD` | `3` | Strikes per penalty week. |
-| `DISHWASHER_COOLDOWN_MINUTES` | `90` | Minutes after an emptying before the next one can be marked. |
+| `DISHWASHER_SUSPICIOUS_COUNT`, `DISHWASHER_SUSPICIOUS_MINUTES` | `3`, `90` | This many dishwasher entries (by anyone) less than these minutes apart are suspicious and show under "Needs attention" on the admin page. Replaces `DISHWASHER_COOLDOWN_MINUTES` (no cooldown any more; an old value in `.env` is ignored). |
 | `DISHWASHER_HEROES` | `2` | How many of a month's top emptiers get the next month off kitchen duty. |
 | `PREVIEW_DAYS` | `14` | Days shown in the plan. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_NAME`, `ADMIN_ROOM` | – | Optional first floor speaker, created on startup only while there are no users (so a deleted admin doesn't come back). |

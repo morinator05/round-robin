@@ -1,17 +1,15 @@
 {# The dishwasher on the dashboard, built like a duty card: the logged-in user's row with the
    button or their state, and one line below. Expects `dishwasher` (`dashboard.dishwasher_ctx`).
-   The button posts via htmx and gets the dashboard back; it takes this card from it. #}
+   The button posts via htmx and gets the dashboard back; it takes this card from it. It's
+   disabled while that runs, so a double click doesn't count twice. #}
 <section class="card duty" id="card-dishwasher">
   <h2>Dishwasher <span class="muted">{{ dishwasher.month|month_name }}</span></h2>
   <div class="person">
     <div class="name">{{ person(user) }}</div>
     {% if dishwasher.state == "can_mark" %}
       <button class="primary" hx-post="/dishwasher?card=1" hx-target="#card-dishwasher"
-              hx-select="#card-dishwasher" hx-swap="outerHTML">I emptied it</button>
-    {% elif dishwasher.state in ("done", "not_needed") %}
-      {# Just emptied (by you or someone else): when it can be marked again, as a plain
-         label rather than a greyed-out button that looks almost like the real one. #}
-      <span class="badge">Again from {{ dishwasher.next_allowed|clock }}</span>
+              hx-select="#card-dishwasher" hx-swap="outerHTML"
+              hx-disabled-elt="this">I emptied it</button>
     {% else %}
       <span class="badge">inactive</span>
     {% endif %}
